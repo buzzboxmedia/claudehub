@@ -7,18 +7,18 @@
 ## Location
 
 ```
-~/Dropbox/Buzzbox/ClaudeHub/
+~/code/claudehub/
 ```
 
 ## How to Run
 
 ```bash
-~/Dropbox/Buzzbox/ClaudeHub/.build/debug/ClaudeHub
+~/code/claudehub/.build/debug/ClaudeHub
 ```
 
 Or rebuild first:
 ```bash
-cd ~/Dropbox/Buzzbox/ClaudeHub && swift build && .build/debug/ClaudeHub
+cd ~/code/claudehub && swift build && .build/debug/ClaudeHub
 ```
 
 ## Features Complete
