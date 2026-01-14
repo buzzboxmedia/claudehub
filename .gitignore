@@ -4,3 +4,7 @@
 *.xcworkspace/xcuserdata/
 DerivedData/
 .DS_Store
+
+# Build artifacts
+build/
+.build/
