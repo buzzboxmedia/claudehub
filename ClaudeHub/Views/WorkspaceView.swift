@@ -170,7 +170,9 @@ struct SessionSidebar: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
-        .background(.ultraThinMaterial.opacity(0.5))
+        .background(
+            VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
+        )
     }
 }
 
@@ -330,6 +332,13 @@ struct TerminalArea: View {
                     Divider()
                     TerminalView(session: session)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                .padding(12)
             } else {
                 // Empty state
                 VStack(spacing: 16) {
