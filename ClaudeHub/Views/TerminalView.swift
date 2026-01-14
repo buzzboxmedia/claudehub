@@ -375,21 +375,80 @@ class TerminalContainerView: NSView {
     private var isShowingHandCursor = false
     private var trackingArea: NSTrackingArea?
     private var clickMonitor: Any?
+    private var dragMonitor: Any?
+    private var mouseDownPoint: CGPoint?
+    private var wasDragging = false
 
-    // Configure terminal for selection when set
+    // Configure terminal for selection and drag-drop
     func configureForSelection() {
         // Disable mouse reporting so selection works
         terminalView?.allowMouseReporting = false
         setupClickMonitor()
+        setupDragDrop()
+    }
+
+    private func setupDragDrop() {
+        // Register for file drag and drop
+        registerForDraggedTypes([.fileURL, .png, .tiff, .pdf])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        // Accept file drops
+        if sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
+            return .copy
+        }
+        return []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else {
+            return false
+        }
+
+        // Insert each file path into terminal
+        for url in urls {
+            let path = url.path
+            logger.info("File dropped: \(path)")
+            terminalView?.send(txt: path + " ")
+        }
+
+        focusTerminal()
+        return true
     }
 
     private func setupClickMonitor() {
-        // Monitor clicks to intercept URL clicks before terminal gets them
+        // Track mouse down position to detect drags vs clicks
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged]) { [weak self] event in
+            guard let self = self else { return event }
+
+            if event.type == .leftMouseDown {
+                self.mouseDownPoint = event.locationInWindow
+                self.wasDragging = false
+            } else if event.type == .leftMouseDragged {
+                // If mouse moved more than 5 pixels, it's a drag (selection)
+                if let downPoint = self.mouseDownPoint {
+                    let distance = hypot(event.locationInWindow.x - downPoint.x,
+                                        event.locationInWindow.y - downPoint.y)
+                    if distance > 5 {
+                        self.wasDragging = true
+                    }
+                }
+            }
+            return event
+        }
+
+        // Monitor clicks to intercept URL clicks (but not selection drags)
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
             guard let self = self,
                   let terminal = self.terminalView,
                   let window = self.window,
                   event.window == window else {
+                return event
+            }
+
+            // Don't open URL if user was dragging to select
+            if self.wasDragging {
+                self.wasDragging = false
                 return event
             }
 
@@ -408,6 +467,9 @@ class TerminalContainerView: NSView {
 
     deinit {
         if let monitor = clickMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = dragMonitor {
             NSEvent.removeMonitor(monitor)
         }
     }
@@ -480,6 +542,34 @@ class TerminalContainerView: NSView {
         guard row >= 0 && row < lines.count else { return nil }
         let clickedLine = lines[row]
 
+        // Check if this line is a continuation of a URL from previous line
+        // (starts with non-space characters that look like URL continuation)
+        if row > 0 && !clickedLine.isEmpty && !clickedLine.hasPrefix(" ") {
+            let prevLine = lines[row - 1].trimmingCharacters(in: .whitespaces)
+            // Check if previous line ends with a partial URL
+            if let lastUrlMatch = Self.urlPattern.matches(in: prevLine, options: [], range: NSRange(prevLine.startIndex..., in: prevLine)).last,
+               let swiftRange = Range(lastUrlMatch.range, in: prevLine) {
+                let urlEndCol = prevLine.distance(from: prevLine.startIndex, to: swiftRange.upperBound)
+                // If URL ends near the end of line, it might continue
+                if urlEndCol >= prevLine.count - 2 {
+                    let partialUrl = String(prevLine[swiftRange])
+                    // Get continuation from current line (until space or end)
+                    let continuation = clickedLine.prefix(while: { !$0.isWhitespace })
+                    var fullUrl = partialUrl + continuation
+
+                    if !fullUrl.lowercased().hasPrefix("http://") && !fullUrl.lowercased().hasPrefix("https://") {
+                        fullUrl = "https://" + fullUrl
+                    }
+
+                    // If clicked on this continuation line, return the full URL
+                    if col < continuation.count {
+                        logger.info("Found wrapped URL: \(fullUrl)")
+                        return URL(string: fullUrl)
+                    }
+                }
+            }
+        }
+
         // Find URLs in this line
         let range = NSRange(clickedLine.startIndex..., in: clickedLine)
         let matches = Self.urlPattern.matches(in: clickedLine, options: [], range: range)
@@ -492,6 +582,16 @@ class TerminalContainerView: NSView {
 
                 if col >= startCol && col < endCol {
                     var urlString = String(clickedLine[swiftRange])
+
+                    // Check if URL continues on next line
+                    if endCol >= clickedLine.count - 2 && row + 1 < lines.count {
+                        let nextLine = lines[row + 1]
+                        if !nextLine.isEmpty && !nextLine.hasPrefix(" ") {
+                            let continuation = nextLine.prefix(while: { !$0.isWhitespace })
+                            urlString += continuation
+                        }
+                    }
+
                     // Add https:// if no protocol specified
                     if !urlString.lowercased().hasPrefix("http://") && !urlString.lowercased().hasPrefix("https://") {
                         urlString = "https://" + urlString
@@ -505,13 +605,26 @@ class TerminalContainerView: NSView {
         return nil
     }
 
-    // Intercept Cmd+V to handle image paste
+    // Intercept Cmd+C and Cmd+V
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // Check for Cmd+V
-        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+        guard event.modifierFlags.contains(.command) else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        switch event.charactersIgnoringModifiers {
+        case "c":
+            // Copy selected text from terminal
+            if let terminal = terminalView {
+                terminal.copy(self)
+                return true
+            }
+        case "v":
+            // Handle image paste
             if handleImagePaste() {
                 return true
             }
+        default:
+            break
         }
         return super.performKeyEquivalent(with: event)
     }

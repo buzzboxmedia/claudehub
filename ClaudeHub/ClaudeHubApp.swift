@@ -281,6 +281,7 @@ class AppState: ObservableObject {
                 Project(name: "AFL", path: "\(clientsPath)/AFL", icon: "building.columns.fill"),
                 Project(name: "Citadel", path: "\(clientsPath)/Citadel", icon: "car.fill"),
                 Project(name: "INFAB", path: "\(clientsPath)/INFAB", icon: "shield.fill"),
+                Project(name: "MAGicALL", path: "\(clientsPath)/MAGicALL", icon: "airplane"),
                 Project(name: "TDS", path: "\(clientsPath)/TDS", icon: "eye.fill")
             ]
         }
