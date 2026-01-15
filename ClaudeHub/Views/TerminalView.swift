@@ -268,9 +268,15 @@ class TerminalController: ObservableObject {
     }
 
     private func startClaudeCommand(in directory: String, claudeSessionId: String?) {
-        // Always start fresh - don't try to resume old sessions that may not exist
-        let claudeCommand = "cd '\(directory)' && claude --dangerously-skip-permissions\n"
-        logger.info("Starting Claude session in: \(directory)")
+        // Resume existing session if we have a session ID, otherwise start fresh
+        let claudeCommand: String
+        if let sessionId = claudeSessionId {
+            claudeCommand = "cd '\(directory)' && claude --resume '\(sessionId)' --dangerously-skip-permissions\n"
+            logger.info("Resuming Claude session: \(sessionId)")
+        } else {
+            claudeCommand = "cd '\(directory)' && claude --dangerously-skip-permissions\n"
+            logger.info("Starting new Claude session in: \(directory)")
+        }
         terminalView?.send(txt: claudeCommand)
 
         // Ensure terminal has focus after Claude starts
@@ -396,6 +402,9 @@ class TerminalContainerView: NSView {
     weak var terminalView: LocalProcessTerminalView?
     weak var controller: TerminalController?  // Reference to get project path
     private let logger = Logger(subsystem: "com.buzzbox.claudehub", category: "TerminalContainer")
+
+    // Use flipped coordinates to match SwiftUI's coordinate system
+    override var isFlipped: Bool { true }
 
     // URL regex for detecting any links (full URLs, domains, subdomains, paths)
     private static let urlPattern = try! NSRegularExpression(
@@ -582,9 +591,9 @@ class TerminalContainerView: NSView {
         let charWidth = font.advancement(forGlyph: font.glyph(withName: "M")).width
         let lineHeight = font.ascender - font.descender + font.leading
 
-        // Calculate approximate row/column
+        // Calculate approximate row/column (using flipped coordinates - origin at top-left)
         let col = Int(point.x / charWidth)
-        let row = Int((terminal.bounds.height - point.y) / lineHeight)
+        let row = Int(point.y / lineHeight)
 
         // Get terminal content
         let data = terminal.getTerminal().getBufferAsData()
@@ -668,9 +677,9 @@ class TerminalContainerView: NSView {
         let charWidth = font.advancement(forGlyph: font.glyph(withName: "M")).width
         let lineHeight = font.ascender - font.descender + font.leading
 
-        // Calculate approximate row/column
+        // Calculate approximate row/column (using flipped coordinates - origin at top-left)
         let col = Int(point.x / charWidth)
-        let row = Int((terminal.bounds.height - point.y) / lineHeight)
+        let row = Int(point.y / lineHeight)
 
         // Get terminal content
         let data = terminal.getTerminal().getBufferAsData()

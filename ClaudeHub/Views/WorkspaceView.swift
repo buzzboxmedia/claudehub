@@ -218,6 +218,15 @@ struct SessionRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
 
+                    // Show description if available
+                    if let description = session.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+
                     // Show "Project" badge for linked sessions
                     if session.isProjectLinked {
                         Text("Project")
@@ -299,10 +308,20 @@ struct TerminalHeader: View {
                 .frame(width: 8, height: 8)
                 .shadow(color: Color.green.opacity(0.6), radius: 4)
 
-            Text(session.name)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if let description = session.description, !description.isEmpty {
+                    Text(description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
 
             Spacer()
 

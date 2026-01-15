@@ -48,7 +48,43 @@ PLIST
 # Register with Launch Services
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_PATH"
 
+# Add to Dock (remove old entries, add correct path)
+python3 << PYTHON
+import subprocess
+import plistlib
+
+APP_PATH = "$APP_PATH"
+
+# Get current dock apps
+result = subprocess.run(['defaults', 'export', 'com.apple.dock', '-'], capture_output=True)
+dock = plistlib.loads(result.stdout)
+
+# Remove any existing ClaudeHub entries
+filtered = [
+    app for app in dock.get('persistent-apps', [])
+    if 'ClaudeHub' not in app.get('tile-data', {}).get('file-data', {}).get('_CFURLString', '')
+]
+
+# Add ClaudeHub with correct path
+filtered.append({
+    'tile-data': {
+        'file-data': {
+            '_CFURLString': f'file://{APP_PATH}/',
+            '_CFURLStringType': 15
+        }
+    }
+})
+
+dock['persistent-apps'] = filtered
+
+# Write back
+plist_data = plistlib.dumps(dock)
+subprocess.run(['defaults', 'import', 'com.apple.dock', '-'], input=plist_data)
+print("✓ Added to Dock")
+PYTHON
+
+killall Dock 2>/dev/null || true
+
 echo "✓ Installed to $APP_PATH"
 echo ""
-echo "To launch: open ~/Applications/ClaudeHub.app"
-echo "Or use Spotlight: ⌘+Space → ClaudeHub"
+echo "Launch from Dock or Spotlight: ⌘+Space → ClaudeHub"
