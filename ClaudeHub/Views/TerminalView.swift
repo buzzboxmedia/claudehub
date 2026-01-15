@@ -888,9 +888,25 @@ class TerminalContainerView: NSView {
 
             switch event.charactersIgnoringModifiers {
             case "c":
-                // Copy selected text before keyDown clears selection
-                terminal.copy(self)
-                return nil  // Consume event
+                // Copy selected text to clipboard
+                // Use SwiftTerm's built-in copy which handles selection properly
+                if self.copySelectedText() {
+                    return nil  // Consume event only if we copied something
+                }
+                // If no selection, let it pass through (for Ctrl+C to terminal)
+                return event
+            case "a":
+                // Select all text in terminal
+                terminal.selectAll(self)
+                self.logger.info("Select all triggered")
+                return nil
+            case "k":
+                // Clear terminal (Cmd+K like iTerm)
+                let terminalObj = terminal.getTerminal()
+                terminalObj.resetToInitialState()
+                terminal.setNeedsDisplay(terminal.bounds)
+                self.logger.info("Terminal cleared")
+                return nil
             case "v":
                 // Handle image paste
                 if self.handleImagePaste() {
@@ -913,6 +929,36 @@ class TerminalContainerView: NSView {
             }
             return event
         }
+    }
+
+    // Copy selected text to clipboard - returns true if text was copied
+    private func copySelectedText() -> Bool {
+        guard let terminal = terminalView else { return false }
+
+        // Store current clipboard content to detect if copy actually happened
+        let previousContent = NSPasteboard.general.string(forType: .string)
+
+        // Clear clipboard and attempt copy
+        NSPasteboard.general.clearContents()
+
+        // SwiftTerm's TerminalView.copy() uses selection.getSelectedText() internally
+        terminal.copy(self)
+
+        // Check if clipboard now has new content (copy succeeded)
+        if let newContent = NSPasteboard.general.string(forType: .string),
+           !newContent.isEmpty {
+            logger.info("Copied \(newContent.count) characters to clipboard")
+            return true
+        }
+
+        // Restore previous clipboard content if copy failed
+        if let previous = previousContent {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(previous, forType: .string)
+        }
+
+        logger.info("No text selected to copy")
+        return false
     }
 
     // Intercept Cmd+V for image paste (backup)
