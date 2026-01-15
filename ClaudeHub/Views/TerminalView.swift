@@ -364,12 +364,15 @@ class TerminalController: ObservableObject {
     private func startClaudeCommand(in directory: String, claudeSessionId: String?) {
         // Resume existing session if we have a session ID, otherwise start fresh
         let claudeCommand: String
+        let isResuming: Bool
         if let sessionId = claudeSessionId {
             claudeCommand = "cd '\(directory)' && claude --resume '\(sessionId)' --dangerously-skip-permissions\n"
             logger.info("Resuming Claude session: \(sessionId)")
+            isResuming = true
         } else {
             claudeCommand = "cd '\(directory)' && claude --dangerously-skip-permissions\n"
             logger.info("Starting new Claude session in: \(directory)")
+            isResuming = false
         }
         terminalView?.send(txt: claudeCommand)
 
@@ -379,6 +382,14 @@ class TerminalController: ObservableObject {
                 NSApplication.shared.activate(ignoringOtherApps: true)
                 window.makeKeyAndOrderFront(nil)
                 window.makeFirstResponder(terminal)
+            }
+        }
+
+        // If resuming, send Enter after delay to auto-confirm the picker
+        if isResuming {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.logger.info("Sending Enter to confirm session picker")
+                self?.terminalView?.send(txt: "\r")
             }
         }
     }
