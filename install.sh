@@ -45,6 +45,12 @@ fi
 # Copy executable (update in place)
 cp ".build/debug/$APP_NAME" "$APP_PATH/Contents/MacOS/"
 
+# Copy icon
+if [ -f "$SCRIPT_DIR/ClaudeHub/Resources/AppIcon.icns" ]; then
+    mkdir -p "$APP_PATH/Contents/Resources"
+    cp "$SCRIPT_DIR/ClaudeHub/Resources/AppIcon.icns" "$APP_PATH/Contents/Resources/"
+fi
+
 # Only create Info.plist on fresh install or if missing
 if [ "$FRESH_INSTALL" = true ] || [ ! -f "$APP_PATH/Contents/Info.plist" ]; then
     cat > "$APP_PATH/Contents/Info.plist" << 'PLIST'
@@ -54,6 +60,8 @@ if [ "$FRESH_INSTALL" = true ] || [ ! -f "$APP_PATH/Contents/Info.plist" ]; then
 <dict>
     <key>CFBundleExecutable</key>
     <string>ClaudeHub</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.buzzbox.claudehub</string>
     <key>CFBundleName</key>
