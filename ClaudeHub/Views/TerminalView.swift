@@ -161,6 +161,37 @@ class TerminalController: ObservableObject {
     var projectPath: String?  // Store project path for screenshot saving
     private let logger = Logger(subsystem: "com.buzzbox.claudehub", category: "TerminalController")
 
+    // Font size management
+    private static let defaultFontSize: CGFloat = 13
+    private static let minFontSize: CGFloat = 8
+    private static let maxFontSize: CGFloat = 32
+    var fontSize: CGFloat = defaultFontSize
+
+    func increaseFontSize() {
+        fontSize = min(fontSize + 1, Self.maxFontSize)
+        updateFont()
+    }
+
+    func decreaseFontSize() {
+        fontSize = max(fontSize - 1, Self.minFontSize)
+        updateFont()
+    }
+
+    func resetFontSize() {
+        fontSize = Self.defaultFontSize
+        updateFont()
+    }
+
+    private func updateFont() {
+        guard let terminal = terminalView else { return }
+        if let sfMono = NSFont(name: "SF Mono", size: fontSize) {
+            terminal.font = sfMono
+        } else {
+            terminal.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
+        logger.info("Font size changed to: \(self.fontSize)")
+    }
+
     // Get terminal content for summarization
     func getTerminalContent() -> String {
         guard let terminal = terminalView?.getTerminal() else {
@@ -238,7 +269,7 @@ class TerminalController: ObservableObject {
 
     private func startClaudeCommand(in directory: String, claudeSessionId: String?) {
         // Always start fresh - don't try to resume old sessions that may not exist
-        let claudeCommand = "cd '\(directory)' && claude\n"
+        let claudeCommand = "cd '\(directory)' && claude --dangerously-skip-permissions\n"
         logger.info("Starting Claude session in: \(directory)")
         terminalView?.send(txt: claudeCommand)
 
@@ -372,6 +403,12 @@ class TerminalContainerView: NSView {
         options: [.caseInsensitive]
     )
 
+    // File path patterns - absolute paths, home paths, and filenames with extensions
+    private static let filePathPattern = try! NSRegularExpression(
+        pattern: #"(~?/[^\s<>\"\'\]\)]+)|([a-zA-Z0-9_-]+\.[a-zA-Z0-9]{1,10})"#,
+        options: []
+    )
+
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
 
@@ -441,7 +478,7 @@ class TerminalContainerView: NSView {
             return event
         }
 
-        // Monitor clicks to intercept URL clicks (but not selection drags)
+        // Monitor clicks to intercept URL clicks and double-clicks for file paths
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
             guard let self = self,
                   let terminal = self.terminalView,
@@ -459,6 +496,16 @@ class TerminalContainerView: NSView {
             // Check if click is within terminal bounds
             let locationInTerminal = terminal.convert(event.locationInWindow, from: nil)
             if terminal.bounds.contains(locationInTerminal) {
+                // Double-click: try to open file path
+                if event.clickCount == 2 {
+                    if let filePath = self.detectFilePathAtPoint(locationInTerminal) {
+                        self.logger.info("Double-click opening file: \(filePath)")
+                        NSWorkspace.shared.open(URL(fileURLWithPath: filePath))
+                        return nil  // Consume the event
+                    }
+                }
+
+                // Single-click: open URLs
                 if let url = self.detectURLAtPoint(locationInTerminal) {
                     self.logger.info("Opening URL: \(url)")
                     NSWorkspace.shared.open(url)
@@ -612,6 +659,124 @@ class TerminalContainerView: NSView {
         return nil
     }
 
+    // Detect file path at a point in terminal coordinates (for double-click to open)
+    private func detectFilePathAtPoint(_ point: CGPoint) -> String? {
+        guard let terminal = terminalView else { return nil }
+
+        // Get terminal font metrics
+        let font = terminal.font
+        let charWidth = font.advancement(forGlyph: font.glyph(withName: "M")).width
+        let lineHeight = font.ascender - font.descender + font.leading
+
+        // Calculate approximate row/column
+        let col = Int(point.x / charWidth)
+        let row = Int((terminal.bounds.height - point.y) / lineHeight)
+
+        // Get terminal content
+        let data = terminal.getTerminal().getBufferAsData()
+        guard let content = String(data: data, encoding: .utf8) else { return nil }
+
+        let lines = content.components(separatedBy: "\n")
+        guard row >= 0 && row < lines.count else { return nil }
+        let clickedLine = lines[row]
+
+        // Find file paths in this line
+        let range = NSRange(clickedLine.startIndex..., in: clickedLine)
+        let matches = Self.filePathPattern.matches(in: clickedLine, options: [], range: range)
+
+        // Check if click position is within any file path
+        for match in matches {
+            if let swiftRange = Range(match.range, in: clickedLine) {
+                let startCol = clickedLine.distance(from: clickedLine.startIndex, to: swiftRange.lowerBound)
+                let endCol = clickedLine.distance(from: clickedLine.startIndex, to: swiftRange.upperBound)
+
+                if col >= startCol && col < endCol {
+                    var pathString = String(clickedLine[swiftRange])
+
+                    // Expand ~ to home directory
+                    if pathString.hasPrefix("~") {
+                        pathString = NSHomeDirectory() + pathString.dropFirst()
+                    }
+
+                    // If it's just a filename (no /), try to find it
+                    if !pathString.contains("/") {
+                        if let resolvedPath = resolveFilename(pathString, fromLines: lines) {
+                            logger.info("Resolved filename '\(pathString)' to: \(resolvedPath)")
+                            return resolvedPath
+                        }
+                    }
+
+                    // Check if file exists
+                    if FileManager.default.fileExists(atPath: pathString) {
+                        logger.info("Found file path at click: \(pathString)")
+                        return pathString
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    // Try to resolve a filename by looking for directory hints in terminal output
+    private func resolveFilename(_ filename: String, fromLines lines: [String]) -> String? {
+        let fileManager = FileManager.default
+
+        // Look for directory mentions in recent terminal output
+        // Common patterns: "in your X folder", "Created X in", "saved to"
+        var searchDirs: [String] = []
+
+        for line in lines.suffix(50) {
+            // Look for Dropbox folder mentions
+            if let dropboxRange = line.range(of: "Dropbox/[^\\s]+", options: .regularExpression) {
+                let folderPath = NSHomeDirectory() + "/" + String(line[dropboxRange])
+                searchDirs.append(folderPath)
+            }
+
+            // Look for "in your X folder" pattern
+            if let match = line.range(of: "in your ([^\\s]+) folder", options: .regularExpression) {
+                let folderName = line[match].replacingOccurrences(of: "in your ", with: "")
+                    .replacingOccurrences(of: " folder", with: "")
+                // Try common locations
+                searchDirs.append(NSHomeDirectory() + "/Dropbox/" + folderName)
+                searchDirs.append(NSHomeDirectory() + "/Documents/" + folderName)
+                searchDirs.append(NSHomeDirectory() + "/Downloads/" + folderName)
+            }
+
+            // Look for absolute paths mentioned in output
+            if let pathMatch = line.range(of: "(/[^\\s]+)", options: .regularExpression) {
+                let path = String(line[pathMatch])
+                if fileManager.fileExists(atPath: path) {
+                    // Check if it's a directory
+                    var isDir: ObjCBool = false
+                    if fileManager.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+                        searchDirs.append(path)
+                    }
+                }
+            }
+        }
+
+        // Add common default locations
+        searchDirs.append(NSHomeDirectory() + "/Downloads")
+        searchDirs.append(NSHomeDirectory() + "/Documents")
+        searchDirs.append(NSHomeDirectory() + "/Desktop")
+
+        // Also try project path if available
+        if let projectPath = controller?.projectPath {
+            searchDirs.insert(projectPath, at: 0)
+        }
+
+        // Search for the file
+        for dir in searchDirs {
+            let fullPath = (dir as NSString).appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: fullPath) {
+                return fullPath
+            }
+        }
+
+        return nil
+    }
+
     // Intercept Cmd+C and Cmd+V at the app level to beat SwiftTerm's keyDown
     private var keyMonitor: Any?
 
@@ -634,6 +799,18 @@ class TerminalContainerView: NSView {
                 if self.handleImagePaste() {
                     return nil
                 }
+            case "=", "+":
+                // Cmd+Plus to zoom in (= is the unshifted key for +)
+                self.controller?.increaseFontSize()
+                return nil
+            case "-":
+                // Cmd+Minus to zoom out
+                self.controller?.decreaseFontSize()
+                return nil
+            case "0":
+                // Cmd+0 to reset zoom
+                self.controller?.resetFontSize()
+                return nil
             default:
                 break
             }

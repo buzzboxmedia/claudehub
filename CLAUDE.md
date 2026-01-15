@@ -1,1 +1,1 @@
-/Users/baronmiller/Library/CloudStorage/Dropbox/Buzzbox/ClaudeHub/CLAUDE.md
+/Users/baronmiller/Dropbox/Buzzbox/ClaudeHub/CLAUDE.md
