@@ -131,13 +131,28 @@ struct TerminalView: View {
         let content = terminalController.getTerminalContent()
         viewLogger.info("Checking terminal content: \(content.count) characters")
 
-        // Look for signs that Claude has responded (at least 50 lines of content)
         let lineCount = content.components(separatedBy: "\n").count
         viewLogger.info("Terminal has \(lineCount) lines")
 
-        // Check if there's meaningful content (Claude typically outputs a lot when it responds)
+        // Wait for some content to appear
+        guard lineCount > 10 else { return }
+
+        // Try to extract user's first input as the title
+        if let userInput = extractUserInput(from: content) {
+            viewLogger.info("Extracted user input: '\(userInput)'")
+            terminalController.hasSummarized = true
+            summarizationTimer?.invalidate()
+
+            // Clean up and truncate the input for a title
+            let title = cleanupTitle(userInput)
+            viewLogger.info("Using title: '\(title)'")
+            appState.updateSessionName(session, name: title)
+            return
+        }
+
+        // Fallback: if we have Claude response but couldn't extract input, use API
         if lineCount > 30 && content.contains("Claude") {
-            viewLogger.info("Detected Claude response, triggering summarization")
+            viewLogger.info("Falling back to API summarization")
             terminalController.hasSummarized = true
             summarizationTimer?.invalidate()
 
@@ -150,6 +165,77 @@ struct TerminalView: View {
                 }
             }
         }
+    }
+
+    /// Extract the user's first input from terminal content
+    private func extractUserInput(from content: String) -> String? {
+        let lines = content.components(separatedBy: "\n")
+
+        // Look for the user's input after Claude's prompt
+        // Claude Code shows ">" or "❯" when waiting for input
+        var foundPrompt = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Skip empty lines
+            if trimmed.isEmpty { continue }
+
+            // Look for Claude's input prompt
+            if trimmed.hasPrefix(">") || trimmed.hasPrefix("❯") {
+                // The text after the prompt is user input
+                let afterPrompt = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
+                if !afterPrompt.isEmpty && afterPrompt.count > 3 {
+                    return String(afterPrompt)
+                }
+                foundPrompt = true
+                continue
+            }
+
+            // If we found a prompt, the next non-empty line is likely user input
+            if foundPrompt && !trimmed.isEmpty {
+                // Skip lines that look like Claude output
+                if trimmed.hasPrefix("Claude") || trimmed.hasPrefix("●") || trimmed.hasPrefix("⏺") {
+                    continue
+                }
+                if trimmed.count > 5 {
+                    return trimmed
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// Clean up user input to make a good title
+    private func cleanupTitle(_ input: String) -> String {
+        var title = input
+
+        // Remove common prefixes
+        let prefixes = ["help me ", "please ", "can you ", "i need to ", "i want to "]
+        for prefix in prefixes {
+            if title.lowercased().hasPrefix(prefix) {
+                title = String(title.dropFirst(prefix.count))
+                break
+            }
+        }
+
+        // Capitalize first letter
+        if let first = title.first {
+            title = first.uppercased() + title.dropFirst()
+        }
+
+        // Truncate if too long (max ~50 chars)
+        if title.count > 50 {
+            // Try to break at a word boundary
+            if let spaceIndex = title.prefix(50).lastIndex(of: " ") {
+                title = String(title[..<spaceIndex]) + "..."
+            } else {
+                title = String(title.prefix(47)) + "..."
+            }
+        }
+
+        return title
     }
 }
 
