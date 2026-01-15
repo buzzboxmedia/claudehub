@@ -993,12 +993,19 @@ class TerminalContainerView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Don't forward - just focus the terminal and let it handle keys directly
+        // Focus terminal and forward the key event
         focusTerminal()
+
+        // If terminal has focus, send the key event to it
+        if let terminal = terminalView {
+            terminal.keyDown(with: event)
+        }
     }
 
     override func keyUp(with event: NSEvent) {
-        // Consumed - terminal handles its own key events
+        if let terminal = terminalView {
+            terminal.keyUp(with: event)
+        }
     }
 
     override func viewDidMoveToWindow() {
