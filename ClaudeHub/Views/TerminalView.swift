@@ -34,21 +34,31 @@ struct TerminalView: View {
                     }
             } else {
                 // Show loading state while auto-starting
-                VStack(spacing: 20) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                VStack(spacing: 24) {
+                    ZStack {
+                        // Animated glow behind spinner
+                        Circle()
+                            .fill(Color.blue.opacity(0.15))
+                            .frame(width: 80, height: 80)
+                            .blur(radius: 20)
 
-                    Text("Starting Claude...")
-                        .font(.headline)
-                        .foregroundColor(.white)
+                        ProgressView()
+                            .scaleEffect(1.8)
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.4, green: 0.6, blue: 1.0)))
+                    }
 
-                    Text(session.projectPath)
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    VStack(spacing: 8) {
+                        Text("Starting Claude...")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.85, green: 0.88, blue: 0.95))
+
+                        Text(session.projectPath)
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(red: 0.5, green: 0.55, blue: 0.65))
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)))
+                .background(Color(NSColor(calibratedRed: 0.075, green: 0.082, blue: 0.11, alpha: 1.0)))
                 .onAppear {
                     viewLogger.info("TerminalView appeared for session: \(session.name), claudeSessionId: \(session.claudeSessionId ?? "none")")
                     // Auto-start Claude with delay to avoid fork crash
@@ -492,22 +502,82 @@ class TerminalController: ObservableObject {
         // Disable mouse reporting so text selection works
         terminal.allowMouseReporting = false
 
-        // Set up colors for dark terminal (slightly transparent for depth)
-        terminal.nativeForegroundColor = NSColor(calibratedRed: 0.92, green: 0.92, blue: 0.94, alpha: 1.0)
-        terminal.nativeBackgroundColor = NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.10, alpha: 0.95)
+        // ClaudeHub custom theme - matches the glass UI with blue accents
+        // Background: Deep blue-grey to complement the glass aesthetic
+        terminal.nativeBackgroundColor = NSColor(
+            calibratedRed: 0.075, green: 0.082, blue: 0.11, alpha: 0.98
+        )
 
-        // Set selection color for visible text highlighting
-        terminal.selectedTextBackgroundColor = NSColor(calibratedRed: 0.2, green: 0.4, blue: 0.8, alpha: 0.5)
+        // Foreground: Soft blue-white for easy reading
+        terminal.nativeForegroundColor = NSColor(
+            calibratedRed: 0.85, green: 0.88, blue: 0.95, alpha: 1.0
+        )
 
-        // Set font - SF Mono for cleaner look
-        if let sfMono = NSFont(name: "SF Mono", size: 13) {
+        // Selection: Matches the app's blue accent
+        terminal.selectedTextBackgroundColor = NSColor(
+            calibratedRed: 0.25, green: 0.45, blue: 0.85, alpha: 0.45
+        )
+
+        // Cursor: Blue accent to match the UI
+        terminal.caretColor = NSColor(
+            calibratedRed: 0.4, green: 0.6, blue: 1.0, alpha: 1.0
+        )
+
+        // Set font - SF Mono for cleaner look, slightly larger for readability
+        if let sfMono = NSFont(name: "SF Mono", size: 13.5) {
             terminal.font = sfMono
         } else {
-            terminal.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+            terminal.font = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
         }
 
-        // Set cursor style
-        terminal.caretColor = NSColor.systemBlue
+        // Install custom ANSI color palette matching ClaudeHub theme
+        installClaudeHubColorPalette(terminal: terminal)
+    }
+
+    /// Custom 16-color ANSI palette designed to match ClaudeHub's glass UI
+    private func installClaudeHubColorPalette(terminal: LocalProcessTerminalView) {
+        let terminalCore = terminal.getTerminal()
+
+        // ClaudeHub palette - blue-tinted with purple/cyan accents
+        let palette: [SwiftTerm.Color] = [
+            // 0: Black (deep blue-grey)
+            SwiftTerm.Color(red: 18, green: 22, blue: 30),
+            // 1: Red (warm coral)
+            SwiftTerm.Color(red: 255, green: 107, blue: 107),
+            // 2: Green (mint)
+            SwiftTerm.Color(red: 98, green: 209, blue: 150),
+            // 3: Yellow (warm gold)
+            SwiftTerm.Color(red: 255, green: 203, blue: 107),
+            // 4: Blue (vibrant blue - primary accent)
+            SwiftTerm.Color(red: 102, green: 153, blue: 255),
+            // 5: Magenta (soft purple)
+            SwiftTerm.Color(red: 199, green: 146, blue: 234),
+            // 6: Cyan (bright teal)
+            SwiftTerm.Color(red: 102, green: 217, blue: 239),
+            // 7: White (soft grey)
+            SwiftTerm.Color(red: 200, green: 208, blue: 220),
+
+            // 8-15: Bright variants
+            // 8: Bright Black (medium grey)
+            SwiftTerm.Color(red: 90, green: 99, blue: 117),
+            // 9: Bright Red
+            SwiftTerm.Color(red: 255, green: 134, blue: 134),
+            // 10: Bright Green
+            SwiftTerm.Color(red: 152, green: 232, blue: 186),
+            // 11: Bright Yellow
+            SwiftTerm.Color(red: 255, green: 218, blue: 143),
+            // 12: Bright Blue
+            SwiftTerm.Color(red: 138, green: 180, blue: 255),
+            // 13: Bright Magenta
+            SwiftTerm.Color(red: 214, green: 175, blue: 243),
+            // 14: Bright Cyan
+            SwiftTerm.Color(red: 150, green: 232, blue: 248),
+            // 15: Bright White
+            SwiftTerm.Color(red: 230, green: 235, blue: 245),
+        ]
+
+        terminalCore.installPalette(colors: palette)
+        logger.info("Installed ClaudeHub color palette")
     }
 
     private func findClaudePath() -> String {
