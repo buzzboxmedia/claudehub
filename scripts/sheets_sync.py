@@ -35,9 +35,28 @@ SCOPES = [
 ]
 
 # Spreadsheet config
-SPREADSHEET_NAME = "Buzzbox Task Log"
+DEFAULT_SPREADSHEET_NAME = "Buzzbox Task Log"
 SHEET_NAME = "Tasks"
-SPREADSHEET_ID_FILE = CONFIG_DIR / "task_log_sheet_id.txt"
+
+# Workspaces with their own spreadsheets
+WORKSPACE_SPREADSHEETS = {
+    "Talkspresso": "Talkspresso Task Log",
+    "Miller": "Miller Task Log",
+}
+
+
+def get_spreadsheet_id_file(workspace: str = None):
+    """Get the spreadsheet ID file path for a workspace."""
+    if workspace and workspace in WORKSPACE_SPREADSHEETS:
+        return CONFIG_DIR / f"task_log_sheet_id_{workspace.lower()}.txt"
+    return CONFIG_DIR / "task_log_sheet_id.txt"
+
+
+def get_spreadsheet_name(workspace: str = None):
+    """Get the spreadsheet name for a workspace."""
+    if workspace and workspace in WORKSPACE_SPREADSHEETS:
+        return WORKSPACE_SPREADSHEETS[workspace]
+    return DEFAULT_SPREADSHEET_NAME
 
 # Column headers
 HEADERS = ["Date", "Time", "Workspace", "Project", "Task", "Description", "Est Hrs", "Actual Hrs", "Status", "Notes"]
@@ -72,25 +91,28 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
-def get_spreadsheet_id():
+def get_spreadsheet_id(workspace: str = None):
     """Get the spreadsheet ID from local cache."""
-    if SPREADSHEET_ID_FILE.exists():
-        return SPREADSHEET_ID_FILE.read_text().strip()
+    id_file = get_spreadsheet_id_file(workspace)
+    if id_file.exists():
+        return id_file.read_text().strip()
     return None
 
 
-def save_spreadsheet_id(spreadsheet_id):
+def save_spreadsheet_id(spreadsheet_id, workspace: str = None):
     """Save spreadsheet ID to local cache."""
-    SPREADSHEET_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SPREADSHEET_ID_FILE.write_text(spreadsheet_id)
+    id_file = get_spreadsheet_id_file(workspace)
+    id_file.parent.mkdir(parents=True, exist_ok=True)
+    id_file.write_text(spreadsheet_id)
 
 
-def find_existing_spreadsheet():
-    """Search for existing Buzzbox Task Log spreadsheet."""
+def find_existing_spreadsheet(workspace: str = None):
+    """Search for existing spreadsheet by name."""
+    spreadsheet_name = get_spreadsheet_name(workspace)
     try:
         drive = get_drive_service()
         results = drive.files().list(
-            q=f"name='{SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+            q=f"name='{spreadsheet_name}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
             spaces="drive",
             fields="files(id, name)"
         ).execute()
@@ -103,13 +125,14 @@ def find_existing_spreadsheet():
     return None
 
 
-def create_spreadsheet():
+def create_spreadsheet(workspace: str = None):
     """Create a new spreadsheet with headers."""
     sheets = get_sheets_service()
+    spreadsheet_name = get_spreadsheet_name(workspace)
 
     spreadsheet = sheets.spreadsheets().create(
         body={
-            "properties": {"title": SPREADSHEET_NAME},
+            "properties": {"title": spreadsheet_name},
             "sheets": [{
                 "properties": {
                     "title": SHEET_NAME,
@@ -168,10 +191,10 @@ def create_spreadsheet():
     return spreadsheet_id
 
 
-def ensure_spreadsheet():
+def ensure_spreadsheet(workspace: str = None):
     """Ensure spreadsheet exists, create if needed. Returns spreadsheet ID."""
     # Check cache first
-    spreadsheet_id = get_spreadsheet_id()
+    spreadsheet_id = get_spreadsheet_id(workspace)
     if spreadsheet_id:
         # Verify it still exists
         try:
@@ -182,22 +205,23 @@ def ensure_spreadsheet():
             pass  # Spreadsheet was deleted, recreate
 
     # Search for existing
-    spreadsheet_id = find_existing_spreadsheet()
+    spreadsheet_id = find_existing_spreadsheet(workspace)
     if spreadsheet_id:
-        save_spreadsheet_id(spreadsheet_id)
+        save_spreadsheet_id(spreadsheet_id, workspace)
         return spreadsheet_id
 
     # Create new
-    spreadsheet_id = create_spreadsheet()
-    save_spreadsheet_id(spreadsheet_id)
-    print(f"Created new spreadsheet: https://docs.google.com/spreadsheets/d/{spreadsheet_id}", file=sys.stderr)
+    spreadsheet_id = create_spreadsheet(workspace)
+    save_spreadsheet_id(spreadsheet_id, workspace)
+    spreadsheet_name = get_spreadsheet_name(workspace)
+    print(f"Created new spreadsheet '{spreadsheet_name}': https://docs.google.com/spreadsheets/d/{spreadsheet_id}", file=sys.stderr)
     return spreadsheet_id
 
 
 def log_task(workspace: str, project: str, task: str, description: str,
               est_hours: float, actual_hours: float, status: str, notes: str):
     """Append a task log entry to the spreadsheet."""
-    spreadsheet_id = ensure_spreadsheet()
+    spreadsheet_id = ensure_spreadsheet(workspace)
     sheets = get_sheets_service()
 
     now = datetime.now()
@@ -244,7 +268,7 @@ def log_task(workspace: str, project: str, task: str, description: str,
 
 def create_project(workspace: str, project: str):
     """Add a project header row to the spreadsheet."""
-    spreadsheet_id = ensure_spreadsheet()
+    spreadsheet_id = ensure_spreadsheet(workspace)
     sheets = get_sheets_service()
 
     now = datetime.now()
@@ -285,7 +309,7 @@ def create_project(workspace: str, project: str):
 
 def create_task(workspace: str, project: str, task: str):
     """Add a new task row to the spreadsheet."""
-    spreadsheet_id = ensure_spreadsheet()
+    spreadsheet_id = ensure_spreadsheet(workspace)
     sheets = get_sheets_service()
 
     now = datetime.now()
@@ -325,9 +349,9 @@ def create_task(workspace: str, project: str, task: str):
     return result
 
 
-def list_tasks(limit: int = 10):
+def list_tasks(limit: int = 10, workspace: str = None):
     """List recent tasks from the spreadsheet."""
-    spreadsheet_id = get_spreadsheet_id()
+    spreadsheet_id = get_spreadsheet_id(workspace)
     if not spreadsheet_id:
         print(json.dumps({"success": False, "error": "No spreadsheet configured. Run 'init' first."}))
         return
