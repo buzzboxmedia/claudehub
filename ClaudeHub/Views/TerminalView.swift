@@ -28,7 +28,6 @@ struct TerminalView: View {
                 SwiftTermView(controller: terminalController)
                     .id(session.id)  // Ensure view updates when session changes
                     .onAppear {
-                        startSummarizationCheck()
                         startAutoSave()
                     }
                     .onDisappear {
