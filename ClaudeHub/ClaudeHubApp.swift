@@ -157,18 +157,23 @@ class AppState: ObservableObject {
     func createSession(for project: Project, name: String? = nil) -> Session {
         // Use provided name or generate default "Task 1", "Task 2", etc
         let taskName: String
+        let isUserNamed: Bool
+
         if let name = name, !name.isEmpty {
             taskName = name
+            isUserNamed = true  // User provided the name, don't auto-rename
         } else {
             let existingCount = sessionsFor(project: project).filter { !$0.isProjectLinked }.count
             taskName = "Task \(existingCount + 1)"
+            isUserNamed = false  // Auto-generated, can be renamed by AI
         }
 
         let session = Session(
             id: UUID(),
             name: taskName,
             projectPath: project.path,
-            createdAt: Date()
+            createdAt: Date(),
+            userNamed: isUserNamed
         )
         sessions.append(session)
         saveSessions()

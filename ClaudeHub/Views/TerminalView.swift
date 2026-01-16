@@ -124,6 +124,13 @@ struct TerminalView: View {
     }
 
     private func checkAndSummarize() {
+        // Don't auto-rename user-named tasks
+        guard !session.userNamed else {
+            viewLogger.debug("User-named task, skipping auto-rename")
+            terminalController.hasSummarized = true
+            return
+        }
+
         // Only summarize once per session
         guard !terminalController.hasSummarized else {
             viewLogger.debug("Already summarized this session, skipping")

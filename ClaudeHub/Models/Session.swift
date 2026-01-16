@@ -16,9 +16,12 @@ struct Session: Identifiable, Hashable, Codable {
     // Summary from last session for context when reopening
     var lastSessionSummary: String?
 
+    // If true, user manually named this task - don't auto-rename
+    var userNamed: Bool = false
+
     enum CodingKeys: String, CodingKey {
         case id, name, description, projectPath, createdAt, lastAccessedAt, claudeSessionId
-        case activeProjectName, parkerBriefing, lastSessionSummary
+        case activeProjectName, parkerBriefing, lastSessionSummary, userNamed
     }
 
     var isProjectLinked: Bool {
