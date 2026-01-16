@@ -692,38 +692,26 @@ struct TerminalHeader: View {
     let session: Session
     let project: Project
     @Binding var showLogSheet: Bool
-    @State private var isPulsing = false
     @State private var isLogHovered = false
     @State private var isSaveHovered = false
     @State private var showSavedConfirmation = false
 
     var body: some View {
         HStack(spacing: 14) {
-            // Animated status indicator
+            // Status indicator (static to avoid layout thrashing)
             ZStack {
-                // Outer glow ring (animated)
+                // Outer glow ring
                 Circle()
                     .fill(Color.green.opacity(0.2))
-                    .frame(width: 20, height: 20)
-                    .scaleEffect(isPulsing ? 1.3 : 1.0)
-                    .opacity(isPulsing ? 0.0 : 0.6)
-
-                // Middle ring
-                Circle()
-                    .fill(Color.green.opacity(0.3))
-                    .frame(width: 14, height: 14)
+                    .frame(width: 18, height: 18)
 
                 // Core dot
                 Circle()
                     .fill(Color.green)
                     .frame(width: 8, height: 8)
-                    .shadow(color: Color.green.opacity(0.8), radius: 6)
+                    .shadow(color: Color.green.opacity(0.8), radius: 4)
             }
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
-                    isPulsing = true
-                }
-            }
+            .frame(width: 20, height: 20)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(session.name)

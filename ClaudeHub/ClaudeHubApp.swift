@@ -25,7 +25,7 @@ struct ClaudeHubApp: App {
                     appDelegate.appState = appState
                 }
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
         .commands {
             // Note: Cmd+N now opens a new independent window (default WindowGroup behavior)
             // Navigation
