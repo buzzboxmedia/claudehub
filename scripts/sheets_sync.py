@@ -246,6 +246,81 @@ def create_spreadsheet(workspace: str = None):
     return spreadsheet_id
 
 
+def fix_spreadsheet_headers(spreadsheet_id):
+    """Add/fix headers and styling on an existing spreadsheet."""
+    sheets = get_sheets_service()
+
+    # Get the sheet ID
+    spreadsheet = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    sheet_id = spreadsheet["sheets"][0]["properties"]["sheetId"]
+
+    # Insert a new row at the top for headers
+    sheets.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {"insertDimension": {
+                    "range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": 0, "endIndex": 1},
+                    "inheritFromBefore": False
+                }}
+            ]
+        }
+    ).execute()
+
+    # Add headers to row 1
+    sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{SHEET_NAME}!A1:J1",
+        valueInputOption="RAW",
+        body={"values": [HEADERS]}
+    ).execute()
+
+    # Apply styling
+    sheets.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                # Header row: dark purple background, white bold text
+                {
+                    "repeatCell": {
+                        "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": {"red": 0.4, "green": 0.2, "blue": 0.6},
+                                "textFormat": {
+                                    "bold": True,
+                                    "fontSize": 11,
+                                    "foregroundColor": {"red": 1, "green": 1, "blue": 1}
+                                },
+                                "horizontalAlignment": "CENTER",
+                                "verticalAlignment": "MIDDLE"
+                            }
+                        },
+                        "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)"
+                    }
+                },
+                # Freeze header row
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": sheet_id,
+                            "gridProperties": {"frozenRowCount": 1}
+                        },
+                        "fields": "gridProperties.frozenRowCount"
+                    }
+                },
+                # Set header row height
+                {"updateDimensionProperties": {
+                    "range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": 0, "endIndex": 1},
+                    "properties": {"pixelSize": 36}, "fields": "pixelSize"
+                }},
+            ]
+        }
+    ).execute()
+
+    print(f"Fixed headers on spreadsheet", file=sys.stderr)
+
+
 def ensure_spreadsheet(workspace: str = None):
     """Ensure spreadsheet exists, create if needed. Returns spreadsheet ID."""
     # Check cache first
@@ -271,6 +346,21 @@ def ensure_spreadsheet(workspace: str = None):
     spreadsheet_name = get_spreadsheet_name(workspace)
     print(f"Created new spreadsheet '{spreadsheet_name}': https://docs.google.com/spreadsheets/d/{spreadsheet_id}", file=sys.stderr)
     return spreadsheet_id
+
+
+def fix_headers_command():
+    """CLI command to fix headers on existing spreadsheet."""
+    spreadsheet_id = get_spreadsheet_id()
+    if not spreadsheet_id:
+        print(json.dumps({"success": False, "error": "No spreadsheet configured"}))
+        return
+
+    fix_spreadsheet_headers(spreadsheet_id)
+    print(json.dumps({
+        "success": True,
+        "spreadsheet_id": spreadsheet_id,
+        "url": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+    }))
 
 
 def log_task(workspace: str, project: str, task: str, description: str,
@@ -468,6 +558,9 @@ def main():
     # Init command
     subparsers.add_parser("init", help="Initialize spreadsheet")
 
+    # Fix headers command
+    subparsers.add_parser("fix-headers", help="Fix headers on existing spreadsheet")
+
     # List command
     list_parser = subparsers.add_parser("list", help="List recent tasks")
     list_parser.add_argument("--limit", type=int, default=10, help="Number of tasks to show")
@@ -499,6 +592,8 @@ def main():
             )
         elif args.command == "init":
             init_spreadsheet()
+        elif args.command == "fix-headers":
+            fix_headers_command()
         elif args.command == "list":
             list_tasks(args.limit)
         elif args.command == "create-project":
