@@ -194,6 +194,118 @@ class ClaudeAPI {
         }.resume()
     }
 
+    /// Generate a billable summary and estimated hours from terminal content
+    func generateBillableSummary(from content: String, taskName: String, completion: @escaping (BillableSummary?) -> Void) {
+        logger.info("generateBillableSummary called for task: '\(taskName)'")
+
+        guard let apiKey = apiKey else {
+            logger.error("No Anthropic API key found - cannot generate summary")
+            completion(nil)
+            return
+        }
+
+        guard !content.isEmpty else {
+            logger.warning("Empty content provided - skipping summary generation")
+            completion(nil)
+            return
+        }
+
+        let truncatedContent = String(content.suffix(6000))
+
+        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+
+        let prompt = """
+        Based on this terminal session, generate a billable time entry for invoicing.
+
+        Task name: \(taskName)
+
+        Terminal content:
+        \(truncatedContent)
+
+        Respond in JSON format only, no other text:
+        {
+            "description": "Short action phrase for invoice, e.g. 'Designed social media graphics' or 'Fixed checkout page bug' (max 10 words)",
+            "estimated_hours": 0.5,
+            "reasoning": "Brief explanation of hour estimate"
+        }
+
+        Base the estimated hours on typical agency rates for this type of work. Common ranges:
+        - Quick fix/review: 0.25-0.5 hrs
+        - Small task: 0.5-1 hr
+        - Medium task: 1-2 hrs
+        - Complex task: 2-4 hrs
+        """
+
+        let body: [String: Any] = [
+            "model": "claude-3-haiku-20240307",
+            "max_tokens": 200,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ]
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            logger.error("Failed to serialize request: \(error.localizedDescription)")
+            completion(nil)
+            return
+        }
+
+        logger.info("Sending billable summary request...")
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            if let error = error {
+                self?.logger.error("API request failed: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            guard let data = data else {
+                self?.logger.error("No data received from API")
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let content = json["content"] as? [[String: Any]],
+                   let firstContent = content.first,
+                   let text = firstContent["text"] as? String {
+
+                    // Parse the JSON response from Claude
+                    if let jsonData = text.data(using: .utf8),
+                       let summaryJson = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                       let description = summaryJson["description"] as? String {
+
+                        let estimatedHours = summaryJson["estimated_hours"] as? Double ?? 0.5
+
+                        let summary = BillableSummary(
+                            description: description,
+                            estimatedHours: estimatedHours
+                        )
+
+                        self?.logger.info("Generated billable summary: '\(description)' (\(estimatedHours) hrs)")
+                        DispatchQueue.main.async { completion(summary) }
+                    } else {
+                        self?.logger.error("Could not parse Claude's JSON response: \(text)")
+                        DispatchQueue.main.async { completion(nil) }
+                    }
+                } else {
+                    self?.logger.error("Unexpected API response format")
+                    DispatchQueue.main.async { completion(nil) }
+                }
+            } catch {
+                self?.logger.error("Failed to parse API response: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion(nil) }
+            }
+        }.resume()
+    }
+
     func setAPIKey(_ key: String) {
         UserDefaults.standard.set(key, forKey: "anthropic_api_key")
     }
@@ -201,4 +313,9 @@ class ClaudeAPI {
     var hasAPIKey: Bool {
         apiKey != nil
     }
+}
+
+struct BillableSummary {
+    let description: String
+    let estimatedHours: Double
 }

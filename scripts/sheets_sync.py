@@ -40,7 +40,7 @@ SHEET_NAME = "Tasks"
 SPREADSHEET_ID_FILE = CONFIG_DIR / "task_log_sheet_id.txt"
 
 # Column headers
-HEADERS = ["Date", "Time", "Project", "Task", "Status", "Notes"]
+HEADERS = ["Date", "Time", "Workspace", "Project", "Task", "Description", "Est Hrs", "Actual Hrs", "Status", "Notes"]
 
 
 def get_credentials():
@@ -194,7 +194,8 @@ def ensure_spreadsheet():
     return spreadsheet_id
 
 
-def log_task(project: str, task: str, status: str, notes: str):
+def log_task(workspace: str, project: str, task: str, description: str,
+              est_hours: float, actual_hours: float, status: str, notes: str):
     """Append a task log entry to the spreadsheet."""
     spreadsheet_id = ensure_spreadsheet()
     sheets = get_sheets_service()
@@ -203,15 +204,19 @@ def log_task(project: str, task: str, status: str, notes: str):
     row = [
         now.strftime("%Y-%m-%d"),
         now.strftime("%H:%M"),
-        project,
+        workspace,
+        project or "—",  # Use dash for quick tasks without a project
         task,
+        description,
+        est_hours,
+        actual_hours,
         status,
         notes
     ]
 
     sheets.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
-        range=f"{SHEET_NAME}!A:F",
+        range=f"{SHEET_NAME}!A:J",
         valueInputOption="RAW",
         insertDataOption="INSERT_ROWS",
         body={"values": [row]}
@@ -224,8 +229,12 @@ def log_task(project: str, task: str, status: str, notes: str):
         "logged": {
             "date": row[0],
             "time": row[1],
+            "workspace": workspace,
             "project": project,
             "task": task,
+            "description": description,
+            "est_hours": est_hours,
+            "actual_hours": actual_hours,
             "status": status
         }
     }
@@ -285,10 +294,14 @@ def main():
 
     # Log command
     log_parser = subparsers.add_parser("log", help="Log a task")
-    log_parser.add_argument("--project", required=True, help="Project name")
+    log_parser.add_argument("--workspace", required=True, help="Workspace name (client or main project)")
+    log_parser.add_argument("--project", default="", help="Project name (optional)")
     log_parser.add_argument("--task", required=True, help="Task name")
+    log_parser.add_argument("--description", required=True, help="Billable description")
+    log_parser.add_argument("--est-hours", type=float, required=True, help="Estimated hours")
+    log_parser.add_argument("--actual-hours", type=float, required=True, help="Actual hours")
     log_parser.add_argument("--status", default="completed", help="Task status")
-    log_parser.add_argument("--notes", default="", help="Task notes/summary")
+    log_parser.add_argument("--notes", default="", help="Additional notes")
 
     # Init command
     subparsers.add_parser("init", help="Initialize spreadsheet")
@@ -301,7 +314,16 @@ def main():
 
     try:
         if args.command == "log":
-            log_task(args.project, args.task, args.status, args.notes)
+            log_task(
+                workspace=args.workspace,
+                project=args.project,
+                task=args.task,
+                description=args.description,
+                est_hours=args.est_hours,
+                actual_hours=args.actual_hours,
+                status=args.status,
+                notes=args.notes
+            )
         elif args.command == "init":
             init_spreadsheet()
         elif args.command == "list":

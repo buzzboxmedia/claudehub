@@ -29,16 +29,24 @@ class GoogleSheetsService {
         struct LoggedTask: Codable {
             let date: String
             let time: String
-            let project: String
+            let workspace: String?
+            let project: String?
             let task: String
+            let description: String?
+            let est_hours: Double?
+            let actual_hours: Double?
             let status: String
         }
     }
 
     /// Log a task to Google Sheets
     func logTask(
-        project: String,
+        workspace: String,
+        project: String?,
         task: String,
+        billableDescription: String,
+        estimatedHours: Double,
+        actualHours: Double,
         status: String = "completed",
         notes: String
     ) async throws -> LogResult {
@@ -47,8 +55,12 @@ class GoogleSheetsService {
         process.arguments = [
             scriptPath,
             "log",
-            "--project", project,
+            "--workspace", workspace,
+            "--project", project ?? "",
             "--task", task,
+            "--description", billableDescription,
+            "--est-hours", String(estimatedHours),
+            "--actual-hours", String(actualHours),
             "--status", status,
             "--notes", notes
         ]

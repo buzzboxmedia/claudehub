@@ -507,10 +507,25 @@ struct LogTaskSheet: View {
     let session: Session
     let project: Project
     @Binding var isPresented: Bool
+
+    // Form fields
+    @State private var billableDescription: String = ""
+    @State private var estimatedHours: String = ""
+    @State private var actualHours: String = ""
     @State private var notes: String = ""
+
+    // State
+    @State private var isGenerating = true
     @State private var isSaving = false
     @State private var saveError: String?
     @State private var savedSuccessfully = false
+
+    var canSave: Bool {
+        !billableDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !actualHours.isEmpty &&
+        Double(actualHours) != nil &&
+        !isSaving
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -541,39 +556,116 @@ struct LogTaskSheet: View {
             Divider()
 
             // Content
-            VStack(alignment: .leading, spacing: 12) {
-                Text("What did you accomplish? What's next?")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Billable Description
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Billable Description")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
 
-                TextEditor(text: $notes)
-                    .font(.system(size: 13))
-                    .frame(minHeight: 120)
-                    .padding(8)
-                    .background(Color.black.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                    )
-
-                if let error = saveError {
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                }
-
-                if savedSuccessfully {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Task logged successfully!")
-                            .foregroundStyle(.green)
+                        if isGenerating {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Generating summary...")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(height: 32)
+                        } else {
+                            TextField("e.g., Designed social media graphics", text: $billableDescription)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13))
+                                .padding(10)
+                                .background(Color.black.opacity(0.2))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                        }
                     }
-                    .font(.system(size: 12))
+
+                    // Hours row
+                    HStack(spacing: 16) {
+                        // Estimated Hours
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Est. Hours")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+
+                            TextField("0.5", text: $estimatedHours)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13))
+                                .padding(10)
+                                .frame(width: 80)
+                                .background(Color.black.opacity(0.2))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                        }
+
+                        // Actual Hours
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Actual Hours *")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+
+                            TextField("0.5", text: $actualHours)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13))
+                                .padding(10)
+                                .frame(width: 80)
+                                .background(Color.black.opacity(0.2))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(actualHours.isEmpty ? Color.orange.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                        }
+
+                        Spacer()
+                    }
+
+                    // Notes (optional)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Notes (optional)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+
+                        TextEditor(text: $notes)
+                            .font(.system(size: 13))
+                            .frame(minHeight: 60)
+                            .padding(8)
+                            .background(Color.black.opacity(0.2))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    }
+
+                    if let error = saveError {
+                        Text(error)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
+                    }
+
+                    if savedSuccessfully {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Task logged successfully!")
+                                .foregroundStyle(.green)
+                        }
+                        .font(.system(size: 12))
+                    }
                 }
+                .padding()
             }
-            .padding()
 
             Divider()
 
@@ -599,61 +691,92 @@ struct LogTaskSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                .disabled(!canSave)
             }
             .padding()
         }
-        .frame(width: 450, height: 350)
+        .frame(width: 500, height: 420)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
         .onAppear {
-            // Pre-fill with existing summary if any
-            if let existing = session.lastSessionSummary {
-                notes = existing
+            generateSummary()
+        }
+    }
+
+    func generateSummary() {
+        // Get terminal content from the session's controller
+        guard let controller = appState.terminalControllers[session.id] else {
+            isGenerating = false
+            billableDescription = session.name
+            estimatedHours = "0.5"
+            return
+        }
+
+        let content = controller.getTerminalContent()
+
+        if content.isEmpty {
+            isGenerating = false
+            billableDescription = session.name
+            estimatedHours = "0.5"
+            return
+        }
+
+        ClaudeAPI.shared.generateBillableSummary(from: content, taskName: session.name) { summary in
+            isGenerating = false
+            if let summary = summary {
+                billableDescription = summary.description
+                estimatedHours = String(format: "%.2f", summary.estimatedHours)
+            } else {
+                // Fallback to task name
+                billableDescription = session.name
+                estimatedHours = "0.5"
             }
         }
     }
 
     func saveLog() {
-        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedNotes.isEmpty else { return }
+        guard canSave else { return }
 
         isSaving = true
         saveError = nil
 
+        let estHrs = Double(estimatedHours) ?? 0.5
+        let actHrs = Double(actualHours) ?? 0.5
+
         Task {
             // Save locally
-            appState.updateSessionSummary(session, summary: trimmedNotes)
+            appState.updateSessionSummary(session, summary: billableDescription)
 
             // Sync to Google Sheets
             do {
                 let result = try await GoogleSheetsService.shared.logTask(
-                    project: project.name,
+                    workspace: project.name,
+                    project: nil,  // TODO: Add project support
                     task: session.name,
+                    billableDescription: billableDescription,
+                    estimatedHours: estHrs,
+                    actualHours: actHrs,
                     status: "completed",
-                    notes: trimmedNotes
+                    notes: notes
                 )
 
                 await MainActor.run {
                     isSaving = false
                     if result.success {
                         savedSuccessfully = true
-                        // Close after a brief delay
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             isPresented = false
                         }
                     } else if result.needs_auth == true {
-                        saveError = "Google Sheets not authorized. Run: python3 ~/Code/claudehub/scripts/sheets_sync.py auth"
+                        saveError = "Google Sheets not authorized."
                     } else {
-                        // Still saved locally, just note the sync issue
-                        saveError = "Saved locally. Google Sheets sync: \(result.error ?? "unknown error")"
+                        saveError = "Saved locally. Sheets sync: \(result.error ?? "unknown error")"
                         savedSuccessfully = true
                     }
                 }
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    // Still saved locally
-                    saveError = "Saved locally. Google Sheets sync failed: \(error.localizedDescription)"
+                    saveError = "Saved locally. Sheets sync failed."
                     savedSuccessfully = true
                 }
             }
