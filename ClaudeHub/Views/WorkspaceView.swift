@@ -108,6 +108,24 @@ struct SessionSidebar: View {
         newGroupName = ""
     }
 
+    func handleTasksDrop(providers: [NSItemProvider]) -> Bool {
+        for provider in providers {
+            if provider.canLoadObject(ofClass: NSString.self) {
+                provider.loadObject(ofClass: NSString.self) { reading, _ in
+                    if let idString = reading as? String,
+                       let sessionId = UUID(uuidString: idString),
+                       let session = appState.sessions.first(where: { $0.id == sessionId }) {
+                        DispatchQueue.main.async {
+                            appState.moveSession(session, toGroup: nil)
+                        }
+                    }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
     var body: some View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 0) {
@@ -294,11 +312,8 @@ struct SessionSidebar: View {
                                 }
                             }
                         }
-                        .dropDestination(for: Session.self) { droppedSessions, _ in
-                            for session in droppedSessions {
-                                appState.moveSession(session, toGroup: nil)
-                            }
-                            return true
+                        .onDrop(of: [.text], isTargeted: nil) { providers in
+                            handleTasksDrop(providers: providers)
                         }
                     }
                     .padding(.vertical, 12)
@@ -464,12 +479,27 @@ struct ProjectGroupSection: View {
                 }
             }
         }
-        .dropDestination(for: Session.self) { droppedSessions, _ in
-            for session in droppedSessions {
-                appState.moveSession(session, toGroup: group)
-            }
-            return true
+        .onDrop(of: [.text], isTargeted: nil) { providers in
+            handleDrop(providers: providers, toGroup: group)
         }
+    }
+
+    private func handleDrop(providers: [NSItemProvider], toGroup: ProjectGroup?) -> Bool {
+        for provider in providers {
+            if provider.canLoadObject(ofClass: NSString.self) {
+                provider.loadObject(ofClass: NSString.self) { reading, _ in
+                    if let idString = reading as? String,
+                       let sessionId = UUID(uuidString: idString),
+                       let session = appState.sessions.first(where: { $0.id == sessionId }) {
+                        DispatchQueue.main.async {
+                            appState.moveSession(session, toGroup: toGroup)
+                        }
+                    }
+                }
+                return true
+            }
+        }
+        return false
     }
 
     private func createTask() {
@@ -685,7 +715,9 @@ struct TaskRow: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .draggable(session)
+        .onDrag {
+            NSItemProvider(object: session.id.uuidString as NSString)
+        }
     }
 
     /// Resume a task by loading context and sending update prompt to Claude
