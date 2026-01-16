@@ -496,6 +496,9 @@ class TerminalController: ObservableObject {
         terminal.nativeForegroundColor = NSColor(calibratedRed: 0.92, green: 0.92, blue: 0.94, alpha: 1.0)
         terminal.nativeBackgroundColor = NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.10, alpha: 0.95)
 
+        // Set selection color for visible text highlighting
+        terminal.selectedTextBackgroundColor = NSColor(calibratedRed: 0.2, green: 0.4, blue: 0.8, alpha: 0.5)
+
         // Set font - SF Mono for cleaner look
         if let sfMono = NSFont(name: "SF Mono", size: 13) {
             terminal.font = sfMono

@@ -400,25 +400,48 @@ struct TerminalHeader: View {
     let session: Session
     let project: Project
     @Binding var showLogSheet: Bool
+    @State private var isPulsing = false
+    @State private var isLogHovered = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Status indicator
-            Circle()
-                .fill(Color.green)
-                .frame(width: 8, height: 8)
-                .shadow(color: Color.green.opacity(0.6), radius: 4)
+        HStack(spacing: 14) {
+            // Animated status indicator
+            ZStack {
+                // Outer glow ring (animated)
+                Circle()
+                    .fill(Color.green.opacity(0.2))
+                    .frame(width: 20, height: 20)
+                    .scaleEffect(isPulsing ? 1.3 : 1.0)
+                    .opacity(isPulsing ? 0.0 : 0.6)
 
-            VStack(alignment: .leading, spacing: 2) {
+                // Middle ring
+                Circle()
+                    .fill(Color.green.opacity(0.3))
+                    .frame(width: 14, height: 14)
+
+                // Core dot
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: Color.green.opacity(0.8), radius: 6)
+            }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
+                    isPulsing = true
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(session.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 if let description = session.description, !description.isEmpty {
                     Text(description)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -426,35 +449,66 @@ struct TerminalHeader: View {
 
             Spacer()
 
-            // Log Task button
+            // Log Task button - more prominent
             Button {
                 showLogSheet = true
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "square.and.pencil")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12, weight: .medium))
                     Text("Log Task")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                 }
-                .foregroundStyle(.blue)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.blue.opacity(0.15))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(
+                    LinearGradient(
+                        colors: [Color.blue, Color.blue.opacity(0.8)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .clipShape(Capsule())
+                .shadow(color: Color.blue.opacity(isLogHovered ? 0.5 : 0.3), radius: isLogHovered ? 8 : 4)
+                .scaleEffect(isLogHovered ? 1.03 : 1.0)
             }
             .buttonStyle(.plain)
+            .onHover { isLogHovered = $0 }
 
-            Text("Running")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.green)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Color.green.opacity(0.15))
-                .clipShape(Capsule())
+            // Running status badge
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 6, height: 6)
+                Text("Running")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.green)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.green.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.green.opacity(0.3), lineWidth: 1)
+            )
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(
+            ZStack {
+                // Frosted glass base
+                VisualEffectView(material: .headerView, blendingMode: .withinWindow)
+
+                // Subtle top highlight
+                LinearGradient(
+                    colors: [Color.white.opacity(0.08), Color.clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        )
     }
 }
 
@@ -469,32 +523,87 @@ struct TerminalArea: View {
             if let session = windowState.activeSession {
                 VStack(spacing: 0) {
                     TerminalHeader(session: session, project: project, showLogSheet: $showLogSheet)
-                    Divider()
+
+                    // Subtle separator line with gradient
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.2), Color.blue.opacity(0.3)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 1)
+
                     TerminalView(session: session)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.2),
+                                    Color.white.opacity(0.05),
+                                    Color.white.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
                 )
-                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                .padding(12)
+                .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 6)
+                .shadow(color: Color.blue.opacity(0.1), radius: 20, x: 0, y: 0)
+                .padding(14)
                 .sheet(isPresented: $showLogSheet) {
                     LogTaskSheet(session: session, project: project, isPresented: $showLogSheet)
                 }
             } else {
-                // Empty state
-                VStack(spacing: 16) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.tertiary)
+                // Enhanced empty state
+                VStack(spacing: 20) {
+                    ZStack {
+                        // Background glow
+                        Circle()
+                            .fill(Color.blue.opacity(0.1))
+                            .frame(width: 120, height: 120)
+                            .blur(radius: 30)
 
-                    Text("Select a task or create a new one")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
+                        Image(systemName: "terminal.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.4), Color.white.opacity(0.2)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                    }
+
+                    VStack(spacing: 8) {
+                        Text("No Active Session")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text("Select a task from the sidebar or create a new one")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.3))
+                .background(
+                    ZStack {
+                        Color.black.opacity(0.4)
+
+                        // Subtle radial gradient for depth
+                        RadialGradient(
+                            colors: [Color.blue.opacity(0.05), Color.clear],
+                            center: .center,
+                            startRadius: 50,
+                            endRadius: 300
+                        )
+                    }
+                )
             }
         }
     }
