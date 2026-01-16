@@ -726,17 +726,11 @@ struct WindowContent: View {
                 LauncherView()
             }
         }
-        .scaleEffect(appState.uiScale, anchor: .topLeading)
-        .frame(
-            width: 1100 * appState.uiScale,
-            height: 700 * appState.uiScale,
-            alignment: .topLeading
-        )
         .background(WindowResizer(scale: appState.uiScale))
     }
 }
 
-/// Helper to resize the window when scale changes
+/// Helper to resize window and scale content
 struct WindowResizer: NSViewRepresentable {
     let scale: CGFloat
 
@@ -745,53 +739,49 @@ struct WindowResizer: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        DispatchQueue.main.async {
-            self.resizeWindow(view.window)
-        }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
-            self.resizeWindow(nsView.window)
-        }
-    }
+            guard let window = nsView.window,
+                  let contentView = window.contentView else { return }
 
-    private func resizeWindow(_ window: NSWindow?) {
-        guard let window = window else { return }
+            // Apply scale transform to content view
+            contentView.wantsLayer = true
+            if let layer = contentView.layer {
+                // Use sublayerTransform so child views scale properly with hit testing
+                var transform = CATransform3DIdentity
+                transform = CATransform3DScale(transform, scale, scale, 1.0)
 
-        let newWidth = Self.baseWidth * scale
-        let newHeight = Self.baseHeight * scale
+                // Animate the transform
+                CATransaction.begin()
+                CATransaction.setAnimationDuration(0.2)
+                layer.sublayerTransform = transform
+                CATransaction.commit()
+            }
 
-        // Get current frame and screen
-        var frame = window.frame
-        guard let screen = window.screen else { return }
+            // Resize window to match scaled content
+            let newWidth = Self.baseWidth * scale
+            let newHeight = Self.baseHeight * scale
 
-        // Calculate new frame, keeping top-left corner in place
-        let oldMaxY = frame.maxY
-        frame.size.width = newWidth
-        frame.size.height = newHeight
-        frame.origin.y = oldMaxY - newHeight  // Keep top edge fixed
+            var frame = window.frame
+            guard let screen = window.screen else { return }
 
-        // Ensure window stays on screen
-        let visibleFrame = screen.visibleFrame
-        if frame.maxX > visibleFrame.maxX {
-            frame.origin.x = visibleFrame.maxX - frame.width
-        }
-        if frame.origin.x < visibleFrame.origin.x {
-            frame.origin.x = visibleFrame.origin.x
-        }
-        if frame.origin.y < visibleFrame.origin.y {
-            frame.origin.y = visibleFrame.origin.y
-        }
-        if frame.maxY > visibleFrame.maxY {
-            frame.origin.y = visibleFrame.maxY - frame.height
-        }
+            let oldMaxY = frame.maxY
+            frame.size.width = newWidth
+            frame.size.height = newHeight
+            frame.origin.y = oldMaxY - newHeight
 
-        // Animate the resize
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            window.animator().setFrame(frame, display: true)
+            // Keep on screen
+            let visibleFrame = screen.visibleFrame
+            frame.origin.x = max(visibleFrame.origin.x, min(frame.origin.x, visibleFrame.maxX - frame.width))
+            frame.origin.y = max(visibleFrame.origin.y, min(frame.origin.y, visibleFrame.maxY - frame.height))
+
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                window.animator().setFrame(frame, display: true)
+            }
         }
     }
 }
