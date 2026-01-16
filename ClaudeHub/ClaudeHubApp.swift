@@ -329,7 +329,7 @@ class AppState: ObservableObject {
             allSessions = oldSessions
             // Save to new per-project format
             sessions = allSessions
-            saveAllSessions()
+            saveAllSessions(allSessions)
             appLogger.info("Migrated \(oldSessions.count) sessions to per-project storage")
         }
 
@@ -338,12 +338,16 @@ class AppState: ObservableObject {
 
     /// Save sessions to their respective project folders
     private func saveSessions() {
-        saveAllSessions()
+        // Run save on background thread to avoid UI lag
+        let sessionsToSave = sessions
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.saveAllSessions(sessionsToSave)
+        }
     }
 
-    private func saveAllSessions() {
+    private func saveAllSessions(_ sessionsToSave: [Session]) {
         // Group sessions by project path
-        let grouped = Dictionary(grouping: sessions) { $0.projectPath }
+        let grouped = Dictionary(grouping: sessionsToSave) { $0.projectPath }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
