@@ -8,11 +8,20 @@ struct IOSSettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Mac Connection Section
+                Section {
+                    ConnectionStatusView()
+                } header: {
+                    Text("Mac Connection")
+                } footer: {
+                    Text("Enter your Mac's Tailscale IP to send quick replies directly")
+                }
+
                 // Sync Status Section
                 Section {
                     CloudKitStatusView()
                 } header: {
-                    Text("Sync")
+                    Text("iCloud Sync")
                 }
 
                 // Stats Section

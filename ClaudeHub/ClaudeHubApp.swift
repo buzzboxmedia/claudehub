@@ -47,6 +47,8 @@ struct ClaudeHubApp: App {
                     NSApplication.shared.activate(ignoringOtherApps: true)
                     // Give AppDelegate access to appState for cleanup on quit
                     appDelegate.appState = appState
+                    // Start Tailscale server for iOS companion app
+                    TailscaleServer.shared.start(appState: appState)
                 }
                 .task {
                     // Run migration on first launch
