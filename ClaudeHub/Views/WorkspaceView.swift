@@ -204,17 +204,21 @@ struct SessionSidebar: View {
                                 Button {
                                     isCreatingTask = true
                                 } label: {
-                                    HStack(spacing: 8) {
+                                    HStack(spacing: 5) {
                                         Image(systemName: "plus")
-                                            .font(.system(size: 14, weight: .semibold))
+                                            .font(.system(size: 11, weight: .medium))
                                         Text("Task")
-                                            .font(.system(size: 14, weight: .medium))
+                                            .font(.system(size: 12, weight: .medium))
                                     }
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 18)
-                                    .padding(.vertical, 12)
-                                    .background(Color.blue)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.06))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -249,17 +253,21 @@ struct SessionSidebar: View {
                                 Button {
                                     isCreatingGroup = true
                                 } label: {
-                                    HStack(spacing: 8) {
+                                    HStack(spacing: 5) {
                                         Image(systemName: "folder.badge.plus")
-                                            .font(.system(size: 14, weight: .semibold))
+                                            .font(.system(size: 11, weight: .medium))
                                         Text("Project")
-                                            .font(.system(size: 14, weight: .medium))
+                                            .font(.system(size: 12, weight: .medium))
                                     }
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 18)
-                                    .padding(.vertical, 12)
-                                    .background(Color.purple)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.06))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
                                 }
                                 .buttonStyle(.plain)
                             }
