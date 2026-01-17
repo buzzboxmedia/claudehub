@@ -1,9 +1,28 @@
 import SwiftUI
+import SwiftData
 
 struct LauncherView: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var windowState: WindowState
+
+    // Fetch all projects, sorted by name
+    @Query(sort: \Project.name) private var allProjects: [Project]
+
     @State private var showSettings = false
+
+    // Filter projects by category
+    var mainProjects: [Project] {
+        allProjects.filter { $0.category == .main }
+    }
+
+    var clientProjects: [Project] {
+        allProjects.filter { $0.category == .client }
+    }
+
+    var devProjects: [Project] {
+        allProjects.filter { $0.category == .dev }
+    }
 
     /// Open the Buzzbox Task Log spreadsheet (creates if needed)
     private func openTaskLogSpreadsheet() {
@@ -27,109 +46,161 @@ struct LauncherView: View {
         }
     }
 
+    // Adaptive grid that responds to window width
+    private let gridColumns = [
+        GridItem(.adaptive(minimum: 120, maximum: 140), spacing: 16)
+    ]
+
     var body: some View {
         ZStack {
             // Glass background
             VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
                 .ignoresSafeArea()
 
-            VStack(spacing: 40) {
-                // Header with settings button
-                HStack {
-                    Spacer()
-                    Text("Claude Hub")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                }
-                .overlay(alignment: .trailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(spacing: 40) {
+                    // Header with settings button
+                    HStack {
+                        Spacer()
+                        Text("Claude Hub")
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 8)
-                }
-
-                VStack(spacing: 32) {
-                    // Main Projects Section
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text("PROJECTS")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .tracking(1.5)
-
-                        HStack(spacing: 16) {
-                            ForEach(appState.mainProjects) { project in
-                                ProjectCard(project: project)
-                            }
-                        }
-                    }
-
-                    // Clients Section
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text("CLIENTS")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .tracking(1.5)
-
-                        HStack(spacing: 16) {
-                            ForEach(appState.clientProjects) { project in
-                                ProjectCard(project: project)
-                            }
-                        }
-                    }
-
-                    Divider()
-                        .padding(.vertical, 8)
-
-                    // Development Section (ClaudeHub itself)
-                    VStack(alignment: .leading, spacing: 20) {
-                        HStack {
-                            Text("DEVELOPMENT")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.orange)
-                                .tracking(1.5)
-
-                            Spacer()
-
-                            // Link to Task Log spreadsheet
+                    .overlay(alignment: .trailing) {
+                        HStack(spacing: 12) {
+                            // Task Log button in header
                             Button {
                                 openTaskLogSpreadsheet()
                             } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "tablecells")
-                                        .font(.system(size: 12))
-                                    Text("Task Log")
-                                        .font(.system(size: 12, weight: .medium))
-                                }
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.white.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Image(systemName: "tablecells")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.secondary)
                             }
                             .buttonStyle(.plain)
-                            .help("Open Buzzbox Task Log in Google Sheets")
+                            .help("Open Buzzbox Task Log")
+
+                            Button {
+                                showSettings = true
+                            } label: {
+                                Image(systemName: "gearshape.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.trailing, 8)
+                    }
+
+                    VStack(spacing: 36) {
+                        // Main Projects Section
+                        if !mainProjects.isEmpty {
+                            ProjectSection(
+                                title: "PROJECTS",
+                                projects: mainProjects,
+                                columns: gridColumns
+                            )
                         }
 
-                        HStack(spacing: 16) {
-                            ForEach(appState.devProjects) { project in
-                                ProjectCard(project: project)
-                            }
+                        // Clients Section
+                        if !clientProjects.isEmpty {
+                            ProjectSection(
+                                title: "CLIENTS",
+                                projects: clientProjects,
+                                columns: gridColumns
+                            )
+                        }
+
+                        // Development Section
+                        if !devProjects.isEmpty {
+                            ProjectSection(
+                                title: "DEVELOPMENT",
+                                projects: devProjects,
+                                columns: gridColumns,
+                                accentColor: .orange
+                            )
                         }
                     }
                 }
+                .padding(48)
             }
-            .padding(48)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .environmentObject(appState)
         }
+        .onAppear {
+            // Create default projects if none exist (first launch after migration)
+            if allProjects.isEmpty {
+                createDefaultProjects()
+            }
+        }
+    }
+
+    /// Create default projects on first launch
+    private func createDefaultProjects() {
+        let dropboxPath = NSString("~/Library/CloudStorage/Dropbox").expandingTildeInPath
+        let clientsPath = NSString("~/Library/CloudStorage/Dropbox/Buzzbox/Clients").expandingTildeInPath
+
+        // Main projects
+        let mainDefaults = [
+            ("Miller", "\(dropboxPath)/Miller", "person.fill"),
+            ("Talkspresso", "\(dropboxPath)/Talkspresso", "cup.and.saucer.fill"),
+            ("Buzzbox", "\(dropboxPath)/Buzzbox", "shippingbox.fill")
+        ]
+
+        for (name, path, icon) in mainDefaults {
+            let project = Project(name: name, path: path, icon: icon, category: .main)
+            modelContext.insert(project)
+        }
+
+        // Client projects
+        let clientDefaults = [
+            ("AAGL", "\(clientsPath)/AAGL", "cross.case.fill"),
+            ("AFL", "\(clientsPath)/AFL", "building.columns.fill"),
+            ("Citadel", "\(clientsPath)/Citadel", "car.fill"),
+            ("INFAB", "\(clientsPath)/INFAB", "shield.fill"),
+            ("MAGicALL", "\(clientsPath)/MAGicALL", "airplane"),
+            ("TDS", "\(clientsPath)/TDS", "eye.fill")
+        ]
+
+        for (name, path, icon) in clientDefaults {
+            let project = Project(name: name, path: path, icon: icon, category: .client)
+            modelContext.insert(project)
+        }
+
+        // Dev project
+        let devProject = Project(
+            name: "ClaudeHub",
+            path: "\(NSHomeDirectory())/Code/claudehub",
+            icon: "hammer.fill",
+            category: .dev
+        )
+        modelContext.insert(devProject)
+    }
+}
+
+// Reusable section component with grid layout
+struct ProjectSection: View {
+    let title: String
+    let projects: [Project]
+    let columns: [GridItem]
+    var accentColor: Color = .secondary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(accentColor)
+                .tracking(1.5)
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                ForEach(projects) { project in
+                    ProjectCard(project: project)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -139,9 +210,9 @@ struct ProjectCard: View {
     let project: Project
     @State private var isHovered = false
 
-    /// Count of sessions waiting for user input (not total sessions)
+    /// Count of sessions waiting for user input
     var waitingCount: Int {
-        appState.waitingCountFor(project: project)
+        project.sessions.filter { appState.waitingSessions.contains($0.id) }.count
     }
 
     var body: some View {

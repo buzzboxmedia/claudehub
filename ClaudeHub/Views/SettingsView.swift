@@ -1,11 +1,24 @@
 import SwiftUI
+import SwiftData
 import AppKit
 
 struct SettingsView: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
     @State private var apiKey: String = UserDefaults.standard.string(forKey: "anthropic_api_key") ?? ""
     @State private var isAPIKeyVisible = false
+
+    // Fetch projects
+    @Query(sort: \Project.name) private var allProjects: [Project]
+
+    var mainProjects: [Project] {
+        allProjects.filter { $0.category == .main }
+    }
+
+    var clientProjects: [Project] {
+        allProjects.filter { $0.category == .client }
+    }
 
     // Notification settings (bound to NotificationManager)
     @ObservedObject private var notificationManager = NotificationManager.shared
@@ -38,7 +51,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button {
-                        addProject(isClient: false)
+                        addProject(category: .main)
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 12, weight: .semibold))
@@ -48,8 +61,8 @@ struct SettingsView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
 
-                ForEach(appState.mainProjects) { project in
-                    ProjectRow(project: project, isClient: false)
+                ForEach(mainProjects) { project in
+                    ProjectRow(project: project)
                 }
             }
 
@@ -64,7 +77,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button {
-                        addProject(isClient: true)
+                        addProject(category: .client)
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 12, weight: .semibold))
@@ -73,8 +86,8 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 16)
 
-                ForEach(appState.clientProjects) { project in
-                    ProjectRow(project: project, isClient: true)
+                ForEach(clientProjects) { project in
+                    ProjectRow(project: project)
                 }
             }
 
@@ -262,7 +275,7 @@ struct SettingsView: View {
         }
     }
 
-    func addProject(isClient: Bool) {
+    func addProject(category: ProjectCategory) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -275,22 +288,16 @@ struct SettingsView: View {
                 let path = url.path
                 let icon = "folder.fill"
 
-                let project = Project(name: name, path: path, icon: icon)
-
-                if isClient {
-                    appState.addClientProject(project)
-                } else {
-                    appState.addMainProject(project)
-                }
+                let project = Project(name: name, path: path, icon: icon, category: category)
+                modelContext.insert(project)
             }
         }
     }
 }
 
 struct ProjectRow: View {
-    @EnvironmentObject var appState: AppState
+    @Environment(\.modelContext) private var modelContext
     let project: Project
-    let isClient: Bool
     @State private var isHovered = false
 
     var body: some View {
@@ -314,11 +321,7 @@ struct ProjectRow: View {
 
             if isHovered {
                 Button {
-                    if isClient {
-                        appState.removeClientProject(project)
-                    } else {
-                        appState.removeMainProject(project)
-                    }
+                    modelContext.delete(project)
                 } label: {
                     Image(systemName: "minus.circle.fill")
                         .font(.system(size: 14))

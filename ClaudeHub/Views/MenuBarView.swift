@@ -1,15 +1,26 @@
 import SwiftUI
+import SwiftData
 
 struct MenuBarView: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
+
+    // Fetch all sessions and projects
+    @Query(sort: \Session.lastAccessedAt, order: .reverse) private var allSessions: [Session]
+    @Query(sort: \Project.name) private var allProjects: [Project]
 
     var waitingCount: Int {
         appState.waitingSessions.count
     }
 
+    // Active (non-completed) sessions
+    var activeSessions: [Session] {
+        allSessions.filter { !$0.isCompleted }
+    }
+
     /// Sessions sorted with waiting ones first
     var sortedSessions: [Session] {
-        appState.sessions.sorted { a, b in
+        activeSessions.sorted { a, b in
             let aWaiting = appState.waitingSessions.contains(a.id)
             let bWaiting = appState.waitingSessions.contains(b.id)
             if aWaiting != bWaiting {
@@ -19,10 +30,22 @@ struct MenuBarView: View {
         }
     }
 
+    var mainProjects: [Project] {
+        allProjects.filter { $0.category == .main }
+    }
+
+    var clientProjects: [Project] {
+        allProjects.filter { $0.category == .client }
+    }
+
+    var devProjects: [Project] {
+        allProjects.filter { $0.category == .dev }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Active sessions
-            if !appState.sessions.isEmpty {
+            if !activeSessions.isEmpty {
                 HStack {
                     Text("ACTIVE SESSIONS")
                         .font(.system(size: 10, weight: .semibold))
@@ -43,7 +66,7 @@ struct MenuBarView: View {
 
                 // Sort sessions: waiting ones first
                 ForEach(sortedSessions.prefix(5)) { session in
-                    MenuBarSessionRow(session: session)
+                    MenuBarSessionRow(session: session, allProjects: allProjects)
                 }
 
                 Divider()
@@ -58,14 +81,14 @@ struct MenuBarView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 4)
 
-            ForEach(appState.mainProjects) { project in
+            ForEach(mainProjects) { project in
                 MenuBarProjectRow(project: project)
             }
 
             Divider()
                 .padding(.vertical, 2)
 
-            ForEach(appState.clientProjects) { project in
+            ForEach(clientProjects) { project in
                 MenuBarProjectRow(project: project)
             }
 
@@ -87,11 +110,11 @@ struct MenuBarView: View {
 struct MenuBarSessionRow: View {
     @EnvironmentObject var appState: AppState
     let session: Session
+    let allProjects: [Project]
     @State private var isHovered = false
 
     var projectName: String {
-        let allProjects = appState.mainProjects + appState.clientProjects + appState.devProjects
-        return allProjects.first { $0.path == session.projectPath }?.name ?? "Unknown"
+        allProjects.first { $0.path == session.projectPath }?.name ?? "Unknown"
     }
 
     var isWaiting: Bool {
@@ -140,7 +163,6 @@ struct MenuBarSessionRow: View {
 }
 
 struct MenuBarProjectRow: View {
-    @EnvironmentObject var appState: AppState
     let project: Project
     @State private var isHovered = false
 

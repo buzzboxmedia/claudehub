@@ -138,8 +138,8 @@ struct TerminalView: View {
             let sessionId = String(latest.name.dropLast(6))  // Remove ".jsonl"
             viewLogger.info("Captured Claude session ID: \(sessionId)")
 
-            // Update the session with the Claude session ID
-            appState.updateClaudeSessionId(session, claudeSessionId: sessionId)
+            // Update the session with the Claude session ID (SwiftData auto-saves)
+            session.claudeSessionId = sessionId
         } else {
             viewLogger.warning("No session files found in Claude projects directory")
         }
@@ -178,12 +178,12 @@ struct TerminalView: View {
             ClaudeAPI.shared.generateTitle(from: userInput) { title in
                 if let title = title {
                     viewLogger.info("Claude generated title: '\(title)'")
-                    appState.updateSessionName(session, name: title)
+                    session.name = title  // SwiftData auto-saves
                 } else {
                     // Fallback: use cleaned up input directly
                     let fallbackTitle = self.cleanupTitle(userInput)
                     viewLogger.info("Using fallback title: '\(fallbackTitle)'")
-                    appState.updateSessionName(session, name: fallbackTitle)
+                    session.name = fallbackTitle  // SwiftData auto-saves
                 }
             }
             return
@@ -198,7 +198,7 @@ struct TerminalView: View {
             ClaudeAPI.shared.summarizeChat(content: content) { title in
                 if let title = title {
                     viewLogger.info("Received summary title: '\(title)'")
-                    appState.updateSessionName(session, name: title)
+                    session.name = title  // SwiftData auto-saves
                 } else {
                     viewLogger.warning("Summarization returned nil")
                 }
@@ -291,7 +291,7 @@ class TerminalController: ObservableObject {
     private var lastTerminalContent: String = ""
     private var contentUnchangedCount: Int = 0
     private weak var appState: AppState?
-    private var currentSession: Session?
+    var currentSession: Session?  // Made internal for AppState access
 
     /// Callback when waiting state changes
     var onWaitingStateChanged: ((Bool) -> Void)?
@@ -371,7 +371,9 @@ class TerminalController: ObservableObject {
         // If content unchanged for 2+ checks (~4 seconds) and shows prompt, mark as waiting
         if contentUnchangedCount >= 2 && isClaudePromptVisible(in: content) {
             if let session = currentSession {
-                appState?.markSessionWaiting(session)
+                // Get project name from path for notification
+                let projectName = URL(fileURLWithPath: session.projectPath).lastPathComponent
+                appState?.markSessionWaiting(session, projectName: projectName)
                 onWaitingStateChanged?(true)
             }
         }
@@ -416,7 +418,7 @@ class TerminalController: ObservableObject {
 
     // MARK: - Log Management
 
-    /// Save the current terminal content to a log file
+    /// Save the current terminal content to a log file (centralized in Dropbox)
     func saveLog(for session: Session) {
         let content = getFullTerminalContent()
         guard !content.isEmpty else {
@@ -424,7 +426,8 @@ class TerminalController: ObservableObject {
             return
         }
 
-        let logsDir = URL(fileURLWithPath: session.projectPath).appendingPathComponent(".claudehub-logs")
+        // Use centralized logs directory in Dropbox
+        let logsDir = Session.centralLogsDir
 
         // Create logs directory if needed
         do {
@@ -437,8 +440,20 @@ class TerminalController: ObservableObject {
         let logPath = session.logPath
 
         // Write log with timestamp header
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let header = "=== ClaudeHub Session Log ===\nSession: \(session.name)\nSaved: \(timestamp)\nProject: \(session.projectPath)\n\n"
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
+        let readableDate = dateFormatter.string(from: Date())
+
+        let header = """
+        === ClaudeHub Session Log ===
+        Session: \(session.name)
+        Project: \(session.projectPath)
+        Saved: \(readableDate)
+        ID: \(session.id.uuidString)
+        =====================================
+
+        """
 
         let fullContent = header + content
 
@@ -446,8 +461,9 @@ class TerminalController: ObservableObject {
             try fullContent.write(to: logPath, atomically: true, encoding: .utf8)
             logger.info("Saved log for session '\(session.name)' to: \(logPath.path)")
 
-            // Update session with log info
-            appState?.updateSessionLogPath(session, logPath: logPath.path)
+            // Update session with log info (SwiftData auto-saves)
+            session.logFilePath = logPath.path
+            session.lastLogSavedAt = Date()
         } catch {
             logger.error("Failed to save log: \(error.localizedDescription)")
         }
@@ -933,13 +949,20 @@ class TerminalContainerView: NSView {
 
         // Calculate approximate row/column (using flipped coordinates - origin at top-left)
         let col = Int(point.x / charWidth)
-        let row = Int(point.y / lineHeight)
+        let screenRow = Int(point.y / lineHeight)
 
-        // Get terminal content
-        let data = terminal.getTerminal().getBufferAsData()
+        // Get terminal content and scroll position
+        let terminalCore = terminal.getTerminal()
+        let data = terminalCore.getBufferAsData()
         guard let content = String(data: data, encoding: .utf8) else { return nil }
 
         let lines = content.components(separatedBy: "\n")
+
+        // Account for scroll position - yDisp is how far we've scrolled from top
+        let scrollOffset = terminalCore.buffer.yDisp
+        let row = scrollOffset + screenRow
+
+        logger.debug("Click at screenRow=\(screenRow), scrollOffset=\(scrollOffset), bufferRow=\(row), totalLines=\(lines.count)")
 
         // Find the clicked line (approximate)
         guard row >= 0 && row < lines.count else { return nil }
@@ -1019,13 +1042,19 @@ class TerminalContainerView: NSView {
 
         // Calculate approximate row/column (using flipped coordinates - origin at top-left)
         let col = Int(point.x / charWidth)
-        let row = Int(point.y / lineHeight)
+        let screenRow = Int(point.y / lineHeight)
 
-        // Get terminal content
-        let data = terminal.getTerminal().getBufferAsData()
+        // Get terminal content and scroll position
+        let terminalCore = terminal.getTerminal()
+        let data = terminalCore.getBufferAsData()
         guard let content = String(data: data, encoding: .utf8) else { return nil }
 
         let lines = content.components(separatedBy: "\n")
+
+        // Account for scroll position
+        let scrollOffset = terminalCore.buffer.yDisp
+        let row = scrollOffset + screenRow
+
         guard row >= 0 && row < lines.count else { return nil }
         let clickedLine = lines[row]
 

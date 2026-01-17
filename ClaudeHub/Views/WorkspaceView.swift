@@ -1,12 +1,15 @@
 import SwiftUI
+import SwiftData
 
 struct WorkspaceView: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var windowState: WindowState
     let project: Project
 
+    // Use the project's sessions relationship instead of a separate query
     var sessions: [Session] {
-        appState.sessionsFor(project: project)
+        project.sessions
     }
 
     func goBack() {
@@ -32,24 +35,90 @@ struct WorkspaceView: View {
         }
         .onAppear {
             // First, create sessions for any active projects from ACTIVE-PROJECTS.md
-            let _ = appState.createSessionsForActiveProjects(project: project)
+            createSessionsForActiveProjects()
 
-            // Get all sessions for this project
-            let projectSessions = appState.sessionsFor(project: project)
-
-            if projectSessions.isEmpty {
-                // No active projects found, create a generic chat session
-                let newSession = appState.createSession(for: project)
+            if project.sessions.isEmpty {
+                // No sessions, create a generic one
+                let newSession = createSession(name: nil, inGroup: nil)
                 windowState.activeSession = newSession
             } else if windowState.activeSession == nil {
                 // Select the first session if none active
-                windowState.activeSession = projectSessions.first
+                windowState.activeSession = project.sessions.first
             }
         }
+    }
+
+    // MARK: - Data Operations
+
+    /// Create sessions for all active projects in ACTIVE-PROJECTS.md
+    private func createSessionsForActiveProjects() {
+        let activeProjects = appState.parseActiveProjects(at: project.path)
+
+        for activeProject in activeProjects {
+            // Check if session already exists for this active project
+            let existingSession = project.sessions.first { session in
+                session.activeProjectName == activeProject.name
+            }
+
+            if existingSession != nil {
+                continue
+            }
+
+            // Generate Parker briefing
+            let briefing = appState.generateBriefing(
+                for: activeProject,
+                clientName: project.name
+            )
+
+            // Create new session linked to this active project
+            let session = Session(
+                name: activeProject.name,
+                projectPath: project.path,
+                activeProjectName: activeProject.name,
+                parkerBriefing: briefing
+            )
+            session.project = project
+            modelContext.insert(session)
+        }
+    }
+
+    func createSession(name: String?, inGroup group: ProjectGroup?) -> Session {
+        let taskName: String
+        let isUserNamed: Bool
+
+        if let name = name, !name.isEmpty {
+            taskName = name
+            isUserNamed = true
+        } else {
+            let existingCount = project.sessions.filter { !$0.isProjectLinked }.count
+            taskName = "Task \(existingCount + 1)"
+            isUserNamed = false
+        }
+
+        let session = Session(
+            name: taskName,
+            projectPath: project.path,
+            userNamed: isUserNamed
+        )
+        session.project = project
+        session.taskGroup = group
+        modelContext.insert(session)
+
+        // Sync to Google Sheets
+        Task {
+            await GoogleSheetsService.shared.createTask(
+                workspace: project.name,
+                project: group?.name,
+                task: taskName
+            )
+        }
+
+        return session
     }
 }
 
 struct SessionSidebar: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var windowState: WindowState
     let project: Project
@@ -60,23 +129,34 @@ struct SessionSidebar: View {
     @State private var newTaskName = ""
     @State private var newGroupName = ""
     @State private var selectedGroupForNewTask: ProjectGroup?
+    @State private var draggedGroupId: UUID?
+    @State private var isCompletedExpanded: Bool = false
     @FocusState private var isTaskFieldFocused: Bool
     @FocusState private var isGroupFieldFocused: Bool
 
     var sessions: [Session] {
-        appState.sessionsFor(project: project)
+        project.sessions
+    }
+
+    var activeSessions: [Session] {
+        sessions.filter { !$0.isCompleted }
+    }
+
+    var completedSessions: [Session] {
+        sessions.filter { $0.isCompleted }
+            .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
     }
 
     var taskGroups: [ProjectGroup] {
-        appState.taskGroupsFor(project: project)
+        project.taskGroups.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     var projectLinkedSessions: [Session] {
-        sessions.filter { $0.isProjectLinked }
+        activeSessions.filter { $0.isProjectLinked }
     }
 
     var standaloneTasks: [Session] {
-        appState.standaloneSessions(for: project)
+        activeSessions.filter { $0.taskGroup == nil && !$0.isProjectLinked }
     }
 
     func createTask() {
@@ -88,11 +168,28 @@ struct SessionSidebar: View {
             return
         }
 
-        let newSession = appState.createSession(for: project, name: name, inGroup: selectedGroupForNewTask)
-        windowState.activeSession = newSession
+        let session = Session(
+            name: name,
+            projectPath: project.path,
+            userNamed: true
+        )
+        session.project = project
+        session.taskGroup = selectedGroupForNewTask
+        modelContext.insert(session)
+
+        windowState.activeSession = session
         isCreatingTask = false
         newTaskName = ""
         selectedGroupForNewTask = nil
+
+        // Sync to Google Sheets
+        Task {
+            await GoogleSheetsService.shared.createTask(
+                workspace: project.name,
+                project: selectedGroupForNewTask?.name,
+                task: name
+            )
+        }
     }
 
     func createGroup() {
@@ -103,20 +200,33 @@ struct SessionSidebar: View {
             return
         }
 
-        _ = appState.createProjectGroup(for: project, name: name)
+        let maxOrder = taskGroups.map { $0.sortOrder }.max() ?? -1
+        let group = ProjectGroup(name: name, projectPath: project.path, sortOrder: maxOrder + 1)
+        group.project = project
+        modelContext.insert(group)
+
         isCreatingGroup = false
         newGroupName = ""
+
+        // Sync to Google Sheets
+        Task {
+            await GoogleSheetsService.shared.createProject(workspace: project.name, project: name)
+        }
     }
 
     func handleTasksDrop(providers: [NSItemProvider]) -> Bool {
         for provider in providers {
             if provider.canLoadObject(ofClass: NSString.self) {
                 provider.loadObject(ofClass: NSString.self) { reading, _ in
-                    if let idString = reading as? String,
-                       let sessionId = UUID(uuidString: idString),
-                       let session = appState.sessions.first(where: { $0.id == sessionId }) {
-                        DispatchQueue.main.async {
-                            appState.moveSession(session, toGroup: nil)
+                    if let idString = reading as? String {
+                        // Ignore group drags - only handle task drags
+                        if idString.hasPrefix("group:") { return }
+
+                        if let sessionId = UUID(uuidString: idString),
+                           let session = sessions.first(where: { $0.id == sessionId }) {
+                            DispatchQueue.main.async {
+                                session.taskGroup = nil
+                            }
                         }
                     }
                 }
@@ -291,8 +401,14 @@ struct SessionSidebar: View {
                         }
 
                         // Project Groups with their tasks
-                        ForEach(taskGroups) { group in
-                            ProjectGroupSection(group: group, project: project)
+                        ForEach(Array(taskGroups.enumerated()), id: \.element.id) { index, group in
+                            ProjectGroupSection(
+                                group: group,
+                                project: project,
+                                index: index,
+                                totalGroups: taskGroups.count,
+                                draggedGroupId: $draggedGroupId
+                            )
                         }
 
                         // Standalone Tasks Section (drop here to remove from group)
@@ -324,6 +440,54 @@ struct SessionSidebar: View {
                         .onDrop(of: [.text], isTargeted: nil) { providers in
                             handleTasksDrop(providers: providers)
                         }
+
+                        // Completed Tasks Section (collapsible)
+                        if !completedSessions.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        isCompletedExpanded.toggle()
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: isCompletedExpanded ? "chevron.down" : "chevron.right")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(.tertiary)
+                                            .frame(width: 12)
+
+                                        Text("COMPLETED")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.tertiary)
+                                            .tracking(1.2)
+
+                                        Text("\(completedSessions.count)")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(.tertiary)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.white.opacity(0.1))
+                                            .clipShape(Capsule())
+
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                if isCompletedExpanded {
+                                    LazyVStack(spacing: 4) {
+                                        ForEach(completedSessions) { session in
+                                            TaskRow(session: session, project: project, isCompletedSection: true)
+                                                .opacity(0.7)
+                                        }
+                                    }
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
                     }
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -340,19 +504,28 @@ struct SessionSidebar: View {
 // MARK: - Project Group Section (collapsible)
 
 struct ProjectGroupSection: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var windowState: WindowState
     let group: ProjectGroup
     let project: Project
+    let index: Int
+    let totalGroups: Int
+    @Binding var draggedGroupId: UUID?
     @State private var isHovered = false
     @State private var isEditing = false
     @State private var editedName: String = ""
     @State private var isCreatingTask = false
     @State private var newTaskName = ""
+    @State private var isDropTarget = false
     @FocusState private var isTaskFieldFocused: Bool
 
     var tasks: [Session] {
-        appState.sessionsFor(taskGroup: group)
+        group.sessions.filter { !$0.isCompleted }
+    }
+
+    var isDragging: Bool {
+        draggedGroupId == group.id
     }
 
     var body: some View {
@@ -361,7 +534,7 @@ struct ProjectGroupSection: View {
             HStack(spacing: 8) {
                 // Expand/collapse chevron
                 Button {
-                    appState.toggleProjectGroupExpanded(group)
+                    group.isExpanded.toggle()
                 } label: {
                     Image(systemName: group.isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
@@ -378,7 +551,7 @@ struct ProjectGroupSection: View {
                 // Group name
                 if isEditing {
                     TextField("Project name", text: $editedName, onCommit: {
-                        appState.renameProjectGroup(group, name: editedName)
+                        group.name = editedName
                         isEditing = false
                     })
                     .textFieldStyle(.plain)
@@ -400,61 +573,75 @@ struct ProjectGroupSection: View {
                     .background(Color.white.opacity(0.1))
                     .clipShape(Capsule())
 
-                // Actions on hover
-                if isHovered {
-                    HStack(spacing: 8) {
-                        // Add task to group
-                        Button {
-                            isCreatingTask = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.blue)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-
-                        // Edit name
-                        Button {
-                            editedName = group.name
-                            isEditing = true
-                        } label: {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-
-                        // Delete group
-                        Button {
-                            appState.deleteProjectGroup(group)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 16))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+                // Actions - always in layout, opacity controlled by hover
+                HStack(spacing: 4) {
+                    // Add task to group
+                    Button {
+                        isCreatingTask = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.blue)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+
+                    // Edit name
+                    Button {
+                        editedName = group.name
+                        isEditing = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    // Delete group
+                    Button {
+                        deleteGroup()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
+                .opacity(isHovered ? 1 : 0)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isHovered ? Color.white.opacity(0.05) : Color.clear)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isDropTarget ? Color.purple.opacity(0.2) : (isHovered ? Color.white.opacity(0.05) : Color.clear))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isDropTarget ? Color.purple.opacity(0.5) : Color.clear, lineWidth: 2)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
+            .opacity(isDragging ? 0.5 : 1.0)
             .onTapGesture(count: 2) {
                 editedName = group.name
                 isEditing = true
             }
             .onTapGesture(count: 1) {
-                appState.toggleProjectGroupExpanded(group)
+                group.isExpanded.toggle()
             }
             .onHover { isHovered = $0 }
+            .onDrag {
+                draggedGroupId = group.id
+                return NSItemProvider(object: "group:\(group.id.uuidString)" as NSString)
+            }
+            .onDrop(of: [.text], isTargeted: $isDropTarget) { providers in
+                handleGroupDrop(providers: providers)
+            }
             .padding(.horizontal, 8)
 
             // New task input (inline)
@@ -499,15 +686,27 @@ struct ProjectGroupSection: View {
         }
     }
 
+    private func deleteGroup() {
+        // Move all tasks in this group to standalone
+        for session in group.sessions {
+            session.taskGroup = nil
+        }
+        modelContext.delete(group)
+    }
+
     private func handleDrop(providers: [NSItemProvider], toGroup: ProjectGroup?) -> Bool {
         for provider in providers {
             if provider.canLoadObject(ofClass: NSString.self) {
                 provider.loadObject(ofClass: NSString.self) { reading, _ in
-                    if let idString = reading as? String,
-                       let sessionId = UUID(uuidString: idString),
-                       let session = appState.sessions.first(where: { $0.id == sessionId }) {
-                        DispatchQueue.main.async {
-                            appState.moveSession(session, toGroup: toGroup)
+                    if let idString = reading as? String {
+                        // Ignore group drags - only handle task drags
+                        if idString.hasPrefix("group:") { return }
+
+                        if let sessionId = UUID(uuidString: idString),
+                           let session = project.sessions.first(where: { $0.id == sessionId }) {
+                            DispatchQueue.main.async {
+                                session.taskGroup = toGroup
+                            }
                         }
                     }
                 }
@@ -515,6 +714,47 @@ struct ProjectGroupSection: View {
             }
         }
         return false
+    }
+
+    private func handleGroupDrop(providers: [NSItemProvider]) -> Bool {
+        for provider in providers {
+            if provider.canLoadObject(ofClass: NSString.self) {
+                provider.loadObject(ofClass: NSString.self) { reading, _ in
+                    if let idString = reading as? String,
+                       idString.hasPrefix("group:") {
+                        let groupIdString = String(idString.dropFirst("group:".count))
+                        if let draggedId = UUID(uuidString: groupIdString),
+                           draggedId != group.id {
+                            DispatchQueue.main.async {
+                                // Find the dragged group and reorder
+                                if let draggedGroup = project.taskGroups.first(where: { $0.id == draggedId }) {
+                                    reorderGroup(draggedGroup, toIndex: index)
+                                }
+                                draggedGroupId = nil
+                            }
+                        }
+                    }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private func reorderGroup(_ draggedGroup: ProjectGroup, toIndex newIndex: Int) {
+        var projectGroups = project.taskGroups.sorted { $0.sortOrder < $1.sortOrder }
+        guard let currentIndex = projectGroups.firstIndex(where: { $0.id == draggedGroup.id }) else { return }
+        guard newIndex >= 0 && newIndex < projectGroups.count else { return }
+        guard currentIndex != newIndex else { return }
+
+        // Remove from current position and insert at new position
+        let movedGroup = projectGroups.remove(at: currentIndex)
+        projectGroups.insert(movedGroup, at: newIndex)
+
+        // Update sortOrder for all groups
+        for (idx, g) in projectGroups.enumerated() {
+            g.sortOrder = idx
+        }
     }
 
     private func createTask() {
@@ -525,23 +765,34 @@ struct ProjectGroupSection: View {
             return
         }
 
-        let newSession = appState.createSession(for: project, name: name, inGroup: group)
-        windowState.activeSession = newSession
+        let session = Session(
+            name: name,
+            projectPath: project.path,
+            userNamed: true
+        )
+        session.project = project
+        session.taskGroup = group
+        modelContext.insert(session)
+
+        windowState.activeSession = session
         isCreatingTask = false
         newTaskName = ""
     }
 }
 
 struct TaskRow: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var windowState: WindowState
     let session: Session
     let project: Project
     var indented: Bool = false  // For tasks inside groups
+    var isCompletedSection: Bool = false  // For completed tasks section
     @State private var isHovered = false
     @State private var isEditing = false
     @State private var editedName: String = ""
     @State private var isResuming = false
+    @State private var isCompleting = false
 
     var isActive: Bool {
         windowState.activeSession?.id == session.id
@@ -557,6 +808,10 @@ struct TaskRow: View {
 
     var hasLog: Bool {
         session.hasLog
+    }
+
+    var isCompleted: Bool {
+        session.isCompleted
     }
 
     /// Status color: green (active/logged), orange (waiting), gray (inactive)
@@ -595,7 +850,7 @@ struct TaskRow: View {
 
             if isEditing {
                 TextField("Task name", text: $editedName, onCommit: {
-                    appState.updateSessionName(session, name: editedName)
+                    session.name = editedName
                     isEditing = false
                 })
                 .textFieldStyle(.plain)
@@ -656,58 +911,113 @@ struct TaskRow: View {
 
             Spacer()
 
-            // Action buttons on hover
-            if isHovered && !isEditing {
-                HStack(spacing: 8) {
-                    // Update/Resume button - only show if session has a log
-                    if hasLog {
-                        Button {
-                            resumeTask()
-                        } label: {
-                            if isResuming {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                                    .frame(width: 28, height: 28)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 28, height: 28)
-                                    .contentShape(Rectangle())
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .help("Resume this task - load context and get status update")
+            // Action buttons - always in layout, opacity controlled by hover
+            HStack(spacing: 4) {
+                // View Log button - only show if session has a log
+                if hasLog {
+                    Button {
+                        NSWorkspace.shared.open(session.actualLogPath)
+                    } label: {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .help("View conversation log")
+                }
 
+                // Complete button - for active tasks only
+                if !isCompleted {
+                    Button {
+                        completeTask()
+                    } label: {
+                        if isCompleting {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 24, height: 24)
+                        } else {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.green)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Complete this task")
+                }
+
+                // Reopen button - for completed tasks only
+                if isCompleted {
+                    Button {
+                        session.isCompleted = false
+                        session.completedAt = nil
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.blue)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reopen this task")
+                }
+
+                // Update/Resume button - only show if session has a log and not completed
+                if hasLog && !isCompleted {
+                    Button {
+                        resumeTask()
+                    } label: {
+                        if isResuming {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 24, height: 24)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.blue)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Resume this task - load context and get status update")
+                }
+
+                if !isCompleted {
                     Button {
                         editedName = session.name
                         isEditing = true
                     } label: {
                         Image(systemName: "pencil")
-                            .font(.system(size: 14))
+                            .font(.system(size: 12))
                             .foregroundStyle(.secondary)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        // Clear window's active session if we're deleting it
-                        if windowState.activeSession?.id == session.id {
-                            windowState.activeSession = nil
-                        }
-                        appState.deleteSession(session)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 28, height: 28)
+                            .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
+
+                Button {
+                    // Clear window's active session if we're deleting it
+                    if windowState.activeSession?.id == session.id {
+                        windowState.activeSession = nil
+                    }
+                    appState.removeController(for: session)
+                    modelContext.delete(session)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isCompleted ? "Delete this task" : "Delete this task")
             }
+            .opacity(isHovered && !isEditing ? 1 : 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, indented ? 8 : 10)
@@ -762,6 +1072,55 @@ struct TaskRow: View {
             isResuming = false
         }
     }
+
+    /// Complete a task - save log and mark as done
+    private func completeTask() {
+        isCompleting = true
+
+        // Save the log first
+        if let controller = appState.terminalControllers[session.id] {
+            controller.saveLog(for: session)
+        }
+
+        // Generate a summary using Claude API (async)
+        let content = appState.terminalControllers[session.id]?.getTerminalContent() ?? ""
+
+        if !content.isEmpty {
+            // Generate summary in background
+            ClaudeAPI.shared.generateTaskSummary(from: content, taskName: session.name) { summary in
+                DispatchQueue.main.async {
+                    // Mark as completed with summary
+                    session.isCompleted = true
+                    session.completedAt = Date()
+                    if let summary = summary {
+                        session.lastSessionSummary = summary
+                    }
+
+                    // Save the log one final time
+                    if let controller = appState.terminalControllers[session.id] {
+                        controller.saveLog(for: session)
+                    }
+
+                    // Clear active session if this was it
+                    if windowState.activeSession?.id == session.id {
+                        windowState.activeSession = nil
+                    }
+
+                    isCompleting = false
+                }
+            }
+        } else {
+            // No content, just complete without summary
+            session.isCompleted = true
+            session.completedAt = Date()
+
+            if windowState.activeSession?.id == session.id {
+                windowState.activeSession = nil
+            }
+
+            isCompleting = false
+        }
+    }
 }
 
 struct TerminalHeader: View {
@@ -770,8 +1129,6 @@ struct TerminalHeader: View {
     let project: Project
     @Binding var showLogSheet: Bool
     @State private var isLogHovered = false
-    @State private var isSaveHovered = false
-    @State private var showSavedConfirmation = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -797,7 +1154,7 @@ struct TerminalHeader: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                if let description = session.description, !description.isEmpty {
+                if let description = session.sessionDescription, !description.isEmpty {
                     Text(description)
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
@@ -808,32 +1165,7 @@ struct TerminalHeader: View {
 
             Spacer()
 
-            // Save Log button
-            Button {
-                saveLog()
-            } label: {
-                HStack(spacing: 5) {
-                    if showSavedConfirmation {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .semibold))
-                    } else {
-                        Image(systemName: "square.and.arrow.down")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    Text(showSavedConfirmation ? "Saved" : "Save")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(showSavedConfirmation ? .green : .secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(isSaveHovered ? 0.15 : 0.08))
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .onHover { isSaveHovered = $0 }
-            .help("Save conversation log for this session")
-
-            // Log Task button - more prominent
+            // Log Task button
             Button {
                 showLogSheet = true
             } label: {
@@ -895,24 +1227,6 @@ struct TerminalHeader: View {
         )
     }
 
-    private func saveLog() {
-        // Get the terminal controller and save the log
-        if let controller = appState.terminalControllers[session.id] {
-            controller.saveLog(for: session)
-
-            // Show confirmation
-            withAnimation {
-                showSavedConfirmation = true
-            }
-
-            // Reset after 2 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                withAnimation {
-                    showSavedConfirmation = false
-                }
-            }
-        }
-    }
 }
 
 struct TerminalArea: View {
@@ -1256,7 +1570,7 @@ struct LogTaskSheet: View {
 
         Task {
             // Save locally first - this is the critical part
-            appState.updateSessionSummary(session, summary: billableDescription)
+            session.lastSessionSummary = billableDescription
 
             // Sync to Google Sheets (optional, may fail)
             do {

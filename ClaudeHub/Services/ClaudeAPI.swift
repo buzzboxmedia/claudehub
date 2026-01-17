@@ -306,6 +306,94 @@ class ClaudeAPI {
         }.resume()
     }
 
+    /// Generate a brief summary of what was accomplished in a task (for completion)
+    func generateTaskSummary(from content: String, taskName: String, completion: @escaping (String?) -> Void) {
+        logger.info("generateTaskSummary called for task: '\(taskName)'")
+
+        guard let apiKey = apiKey else {
+            logger.warning("No API key - using task name as summary")
+            completion(taskName)
+            return
+        }
+
+        guard !content.isEmpty else {
+            logger.warning("Empty content - using task name as summary")
+            completion(taskName)
+            return
+        }
+
+        let truncatedContent = String(content.suffix(4000))
+
+        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+
+        let prompt = """
+        Based on this terminal session, write a brief 1-2 sentence summary of what was accomplished.
+        Focus on the outcome and any key decisions made. Keep it concise for display in a sidebar.
+
+        Task name: \(taskName)
+
+        Terminal content:
+        \(truncatedContent)
+
+        Respond with just the summary text, no quotes or formatting.
+        Example: "Implemented the login form with email validation. Added error handling for failed attempts."
+        """
+
+        let body: [String: Any] = [
+            "model": "claude-3-haiku-20240307",
+            "max_tokens": 150,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ]
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            logger.error("Failed to serialize request: \(error.localizedDescription)")
+            completion(taskName)
+            return
+        }
+
+        logger.info("Sending task summary request...")
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            if let error = error {
+                self?.logger.error("API request failed: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion(taskName) }
+                return
+            }
+
+            guard let data = data else {
+                self?.logger.error("No data received from API")
+                DispatchQueue.main.async { completion(taskName) }
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let content = json["content"] as? [[String: Any]],
+                   let firstContent = content.first,
+                   let text = firstContent["text"] as? String {
+
+                    let summary = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self?.logger.info("Generated task summary: '\(summary)'")
+                    DispatchQueue.main.async { completion(summary) }
+                } else {
+                    self?.logger.error("Unexpected API response format")
+                    DispatchQueue.main.async { completion(taskName) }
+                }
+            } catch {
+                self?.logger.error("Failed to parse API response: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion(taskName) }
+            }
+        }.resume()
+    }
+
     func setAPIKey(_ key: String) {
         UserDefaults.standard.set(key, forKey: "anthropic_api_key")
     }
