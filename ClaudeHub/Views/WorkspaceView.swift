@@ -34,9 +34,6 @@ struct WorkspaceView: View {
                 .ignoresSafeArea()
         }
         .onAppear {
-            // First, create sessions for any active projects from ACTIVE-PROJECTS.md
-            createSessionsForActiveProjects()
-
             if project.sessions.isEmpty {
                 // No sessions, create a generic one
                 let newSession = createSession(name: nil, inGroup: nil)
@@ -49,38 +46,6 @@ struct WorkspaceView: View {
     }
 
     // MARK: - Data Operations
-
-    /// Create sessions for all active projects in ACTIVE-PROJECTS.md
-    private func createSessionsForActiveProjects() {
-        let activeProjects = appState.parseActiveProjects(at: project.path)
-
-        for activeProject in activeProjects {
-            // Check if session already exists for this active project
-            let existingSession = project.sessions.first { session in
-                session.activeProjectName == activeProject.name
-            }
-
-            if existingSession != nil {
-                continue
-            }
-
-            // Generate Parker briefing
-            let briefing = appState.generateBriefing(
-                for: activeProject,
-                clientName: project.name
-            )
-
-            // Create new session linked to this active project
-            let session = Session(
-                name: activeProject.name,
-                projectPath: project.path,
-                activeProjectName: activeProject.name,
-                parkerBriefing: briefing
-            )
-            session.project = project
-            modelContext.insert(session)
-        }
-    }
 
     func createSession(name: String?, inGroup group: ProjectGroup?) -> Session {
         let taskName: String
@@ -144,12 +109,8 @@ struct SessionSidebar: View {
         project.taskGroups.sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    var projectLinkedSessions: [Session] {
-        activeSessions.filter { $0.isProjectLinked }
-    }
-
     var standaloneTasks: [Session] {
-        activeSessions.filter { $0.taskGroup == nil && !$0.isProjectLinked }
+        activeSessions.filter { $0.taskGroup == nil }
     }
 
     func createTask() {
@@ -440,22 +401,6 @@ struct SessionSidebar: View {
                             }
                         }
                         .padding(.horizontal, 16)
-
-                        // Active Projects Section (from ACTIVE-PROJECTS.md)
-                        if !projectLinkedSessions.isEmpty {
-                            Text("ACTIVE PROJECTS")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .tracking(1.2)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 4)
-
-                            LazyVStack(spacing: 4) {
-                                ForEach(projectLinkedSessions) { session in
-                                    TaskRow(session: session, project: project)
-                                }
-                            }
-                        }
 
                         // Project Groups with their tasks
                         ForEach(Array(taskGroups.enumerated()), id: \.element.id) { index, group in
