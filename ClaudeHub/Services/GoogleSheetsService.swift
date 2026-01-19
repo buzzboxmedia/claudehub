@@ -126,7 +126,7 @@ class GoogleSheetsService {
     }
 
     /// Create a task in Google Sheets
-    func createTask(workspace: String, project: String?, task: String) async {
+    func createTask(workspace: String, project: String?, task: String, description: String = "") async {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [
@@ -134,7 +134,8 @@ class GoogleSheetsService {
             "create-task",
             "--workspace", workspace,
             "--project", project ?? "",
-            "--task", task
+            "--task", task,
+            "--description", description
         ]
 
         let outputPipe = Pipe()
@@ -146,6 +147,134 @@ class GoogleSheetsService {
             process.waitUntilExit()
         } catch {
             print("Failed to sync task to sheets: \(error)")
+        }
+    }
+
+    // MARK: - Task Fetching
+
+    struct SheetTask: Codable, Identifiable {
+        let row: Int
+        let date: String
+        let time: String
+        let workspace: String
+        let project: String
+        let task: String
+        let description: String
+        let est_hours: String
+        let actual_hours: String
+        let status: String
+        let notes: String
+
+        var id: Int { row }
+
+        var isActive: Bool {
+            status == "active" || status == "created"
+        }
+    }
+
+    struct FetchTasksResult: Codable {
+        let success: Bool
+        let tasks: [SheetTask]?
+        let workspace: String?
+        let error: String?
+    }
+
+    /// Fetch tasks for a workspace from Google Sheets
+    func fetchTasks(workspace: String, status: String? = nil) async throws -> [SheetTask] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+
+        var args = [scriptPath, "get-tasks", "--workspace", workspace]
+        if let status = status {
+            args.append(contentsOf: ["--status", status])
+        }
+        process.arguments = args
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+
+                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+
+                    if let result = try? JSONDecoder().decode(FetchTasksResult.self, from: outputData) {
+                        if result.success {
+                            continuation.resume(returning: result.tasks ?? [])
+                        } else {
+                            continuation.resume(returning: [])
+                        }
+                    } else {
+                        continuation.resume(returning: [])
+                    }
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    struct UpdateTaskResult: Codable {
+        let success: Bool
+        let error: String?
+    }
+
+    /// Update a task in Google Sheets
+    func updateTask(
+        workspace: String,
+        taskName: String,
+        status: String? = nil,
+        notes: String? = nil,
+        description: String? = nil,
+        actualHours: Double? = nil
+    ) async throws -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+
+        var args = [scriptPath, "update-task", "--workspace", workspace, "--task", taskName]
+
+        if let status = status {
+            args.append(contentsOf: ["--status", status])
+        }
+        if let notes = notes {
+            args.append(contentsOf: ["--notes", notes])
+        }
+        if let description = description {
+            args.append(contentsOf: ["--description", description])
+        }
+        if let hours = actualHours {
+            args.append(contentsOf: ["--actual-hours", String(hours)])
+        }
+
+        process.arguments = args
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+
+                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+
+                    if let result = try? JSONDecoder().decode(UpdateTaskResult.self, from: outputData) {
+                        continuation.resume(returning: result.success)
+                    } else {
+                        continuation.resume(returning: false)
+                    }
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
         }
     }
 

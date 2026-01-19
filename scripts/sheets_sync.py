@@ -452,7 +452,7 @@ def create_project(workspace: str, project: str):
     return result
 
 
-def create_task(workspace: str, project: str, task: str):
+def create_task(workspace: str, project: str, task: str, description: str = ""):
     """Add a new task row to the spreadsheet."""
     spreadsheet_id = ensure_spreadsheet(workspace)
     sheets = get_sheets_service()
@@ -464,11 +464,11 @@ def create_task(workspace: str, project: str, task: str):
         workspace,
         project or "—",
         task,
-        "",  # No description yet
+        description,
         "",  # No hours yet
         "",
-        "created",  # Status = created (not started)
-        ""
+        "active",  # Status = active
+        ""  # Notes/progress
     ]
 
     sheets.spreadsheets().values().append(
@@ -487,7 +487,8 @@ def create_task(workspace: str, project: str, task: str):
             "type": "task",
             "workspace": workspace,
             "project": project,
-            "task": task
+            "task": task,
+            "description": description
         }
     }
     print(json.dumps(result))
@@ -505,7 +506,7 @@ def list_tasks(limit: int = 10, workspace: str = None):
 
     result = sheets.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"{SHEET_NAME}!A:F"
+        range=f"{SHEET_NAME}!A:J"
     ).execute()
 
     rows = result.get("values", [])
@@ -515,18 +516,167 @@ def list_tasks(limit: int = 10, workspace: str = None):
 
     # Skip header, get last N rows
     tasks = []
-    for row in rows[-limit:]:
+    for row in rows[1:][-limit:]:  # Skip header row
         if len(row) >= 5:
             tasks.append({
                 "date": row[0] if len(row) > 0 else "",
                 "time": row[1] if len(row) > 1 else "",
-                "project": row[2] if len(row) > 2 else "",
-                "task": row[3] if len(row) > 3 else "",
-                "status": row[4] if len(row) > 4 else "",
-                "notes": row[5] if len(row) > 5 else ""
+                "workspace": row[2] if len(row) > 2 else "",
+                "project": row[3] if len(row) > 3 else "",
+                "task": row[4] if len(row) > 4 else "",
+                "description": row[5] if len(row) > 5 else "",
+                "est_hours": row[6] if len(row) > 6 else "",
+                "actual_hours": row[7] if len(row) > 7 else "",
+                "status": row[8] if len(row) > 8 else "",
+                "notes": row[9] if len(row) > 9 else ""
             })
 
     print(json.dumps({"success": True, "tasks": tasks}))
+
+
+def get_tasks(workspace: str, status: str = None):
+    """Get tasks for a specific workspace, optionally filtered by status."""
+    spreadsheet_id = get_spreadsheet_id(workspace)
+    if not spreadsheet_id:
+        # Try default spreadsheet for client workspaces
+        spreadsheet_id = get_spreadsheet_id(None)
+
+    if not spreadsheet_id:
+        print(json.dumps({"success": False, "error": "No spreadsheet configured. Run 'init' first."}))
+        return
+
+    sheets = get_sheets_service()
+
+    result = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{SHEET_NAME}!A:J"
+    ).execute()
+
+    rows = result.get("values", [])
+    if len(rows) <= 1:
+        print(json.dumps({"success": True, "tasks": [], "workspace": workspace}))
+        return
+
+    tasks = []
+    for idx, row in enumerate(rows[1:], start=2):  # Start at row 2 (1-indexed for sheets)
+        if len(row) < 5:
+            continue
+
+        row_workspace = row[2] if len(row) > 2 else ""
+        row_status = row[8] if len(row) > 8 else ""
+
+        # Filter by workspace
+        if row_workspace.lower() != workspace.lower():
+            continue
+
+        # Filter by status if specified
+        if status and row_status.lower() != status.lower():
+            continue
+
+        # Skip project header rows
+        if row_status == "project":
+            continue
+
+        tasks.append({
+            "row": idx,  # Row number in sheet for updates
+            "date": row[0] if len(row) > 0 else "",
+            "time": row[1] if len(row) > 1 else "",
+            "workspace": row_workspace,
+            "project": row[3] if len(row) > 3 else "",
+            "task": row[4] if len(row) > 4 else "",
+            "description": row[5] if len(row) > 5 else "",
+            "est_hours": row[6] if len(row) > 6 else "",
+            "actual_hours": row[7] if len(row) > 7 else "",
+            "status": row_status,
+            "notes": row[9] if len(row) > 9 else ""
+        })
+
+    print(json.dumps({"success": True, "tasks": tasks, "workspace": workspace}))
+
+
+def update_task(workspace: str, task_name: str, status: str = None, notes: str = None,
+                description: str = None, actual_hours: float = None):
+    """Update an existing task's status, notes, or description."""
+    spreadsheet_id = get_spreadsheet_id(workspace)
+    if not spreadsheet_id:
+        spreadsheet_id = get_spreadsheet_id(None)
+
+    if not spreadsheet_id:
+        print(json.dumps({"success": False, "error": "No spreadsheet configured"}))
+        return
+
+    sheets = get_sheets_service()
+
+    # Find the task row
+    result = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{SHEET_NAME}!A:J"
+    ).execute()
+
+    rows = result.get("values", [])
+    task_row = None
+
+    for idx, row in enumerate(rows[1:], start=2):
+        if len(row) < 5:
+            continue
+        row_workspace = row[2] if len(row) > 2 else ""
+        row_task = row[4] if len(row) > 4 else ""
+
+        if row_workspace.lower() == workspace.lower() and row_task.lower() == task_name.lower():
+            task_row = idx
+            break
+
+    if not task_row:
+        print(json.dumps({"success": False, "error": f"Task '{task_name}' not found in workspace '{workspace}'"}))
+        return
+
+    updates = []
+
+    if description is not None:
+        updates.append({
+            "range": f"{SHEET_NAME}!F{task_row}",
+            "values": [[description]]
+        })
+
+    if actual_hours is not None:
+        updates.append({
+            "range": f"{SHEET_NAME}!H{task_row}",
+            "values": [[actual_hours]]
+        })
+
+    if status is not None:
+        updates.append({
+            "range": f"{SHEET_NAME}!I{task_row}",
+            "values": [[status]]
+        })
+
+    if notes is not None:
+        # Append to existing notes
+        existing_notes = rows[task_row - 1][9] if len(rows[task_row - 1]) > 9 else ""
+        timestamp = datetime.now().strftime("%m/%d %H:%M")
+        new_notes = f"{existing_notes}\n[{timestamp}] {notes}".strip()
+        updates.append({
+            "range": f"{SHEET_NAME}!J{task_row}",
+            "values": [[new_notes]]
+        })
+
+    if updates:
+        sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": updates}
+        ).execute()
+
+    print(json.dumps({
+        "success": True,
+        "updated": {
+            "workspace": workspace,
+            "task": task_name,
+            "row": task_row,
+            "status": status,
+            "notes": notes,
+            "description": description
+        }
+    }))
 
 
 def init_spreadsheet():
@@ -575,6 +725,21 @@ def main():
     create_task_parser.add_argument("--workspace", required=True, help="Workspace name")
     create_task_parser.add_argument("--project", default="", help="Project name (optional)")
     create_task_parser.add_argument("--task", required=True, help="Task name")
+    create_task_parser.add_argument("--description", default="", help="Task description")
+
+    # Get tasks command
+    get_tasks_parser = subparsers.add_parser("get-tasks", help="Get tasks for a workspace")
+    get_tasks_parser.add_argument("--workspace", required=True, help="Workspace name")
+    get_tasks_parser.add_argument("--status", default=None, help="Filter by status (active, done, etc.)")
+
+    # Update task command
+    update_task_parser = subparsers.add_parser("update-task", help="Update a task")
+    update_task_parser.add_argument("--workspace", required=True, help="Workspace name")
+    update_task_parser.add_argument("--task", required=True, help="Task name")
+    update_task_parser.add_argument("--status", default=None, help="New status")
+    update_task_parser.add_argument("--notes", default=None, help="Progress notes to append")
+    update_task_parser.add_argument("--description", default=None, help="Update description")
+    update_task_parser.add_argument("--actual-hours", type=float, default=None, help="Actual hours spent")
 
     args = parser.parse_args()
 
@@ -599,7 +764,18 @@ def main():
         elif args.command == "create-project":
             create_project(workspace=args.workspace, project=args.project)
         elif args.command == "create-task":
-            create_task(workspace=args.workspace, project=args.project, task=args.task)
+            create_task(workspace=args.workspace, project=args.project, task=args.task, description=args.description)
+        elif args.command == "get-tasks":
+            get_tasks(workspace=args.workspace, status=args.status)
+        elif args.command == "update-task":
+            update_task(
+                workspace=args.workspace,
+                task_name=args.task,
+                status=args.status,
+                notes=args.notes,
+                description=args.description,
+                actual_hours=args.actual_hours
+            )
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}), file=sys.stderr)
         sys.exit(1)
