@@ -925,38 +925,23 @@ struct TaskRow: View {
 
             Spacer()
 
-            // Action buttons - always in layout, opacity controlled by hover
+            // Action buttons - simplified: just primary action + delete
             HStack(spacing: 4) {
-                // Task Detail button - show task description and session history
-                Button {
-                    showingTaskDetail = true
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.blue)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("View task details and session history")
-
-                // View Log button - only show if session has a log
-                if hasLog {
+                if isCompleted {
+                    // Billing button for completed tasks
                     Button {
-                        NSWorkspace.shared.open(session.actualLogPath)
+                        showingBillingSheet = true
                     } label: {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                        Image(systemName: "dollarsign.circle")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.green)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("View conversation log")
-                }
-
-                // Complete button - for active tasks only
-                if !isCompleted {
+                    .help("Send to billing")
+                } else {
+                    // Complete button for active tasks
                     Button {
                         completeTask()
                     } label: {
@@ -976,72 +961,8 @@ struct TaskRow: View {
                     .help("Complete this task")
                 }
 
-                // Reopen button - for completed tasks only
-                if isCompleted {
-                    Button {
-                        session.isCompleted = false
-                        session.completedAt = nil
-                    } label: {
-                        Image(systemName: "arrow.uturn.backward.circle")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.blue)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Reopen this task")
-
-                    // Send to Billing button
-                    Button {
-                        showingBillingSheet = true
-                    } label: {
-                        Image(systemName: "dollarsign.circle")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.green)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Send to billing")
-                }
-
-                // Update/Resume button - only show if session has a log and not completed
-                if hasLog && !isCompleted {
-                    Button {
-                        resumeTask()
-                    } label: {
-                        if isResuming {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                                .frame(width: 24, height: 24)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.blue)
-                                .frame(width: 24, height: 24)
-                                .contentShape(Rectangle())
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .help("Resume this task - load context and get status update")
-                }
-
-                if !isCompleted {
-                    Button {
-                        editedName = session.name
-                        isEditing = true
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
+                // Delete button
                 Button {
-                    // Clear window's active session if we're deleting it
                     if windowState.activeSession?.id == session.id {
                         windowState.activeSession = nil
                     }
@@ -1055,7 +976,7 @@ struct TaskRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(isCompleted ? "Delete this task" : "Delete this task")
+                .help("Delete this task")
             }
             .opacity(isHovered && !isEditing ? 1 : 0)
         }
@@ -1088,6 +1009,59 @@ struct TaskRow: View {
         }
         .onDrag {
             NSItemProvider(object: session.id.uuidString as NSString)
+        }
+        .contextMenu {
+            Button {
+                showingTaskDetail = true
+            } label: {
+                Label("View Details", systemImage: "info.circle")
+            }
+
+            if hasLog {
+                Button {
+                    NSWorkspace.shared.open(session.actualLogPath)
+                } label: {
+                    Label("View Log", systemImage: "doc.text")
+                }
+
+                if !isCompleted {
+                    Button {
+                        resumeTask()
+                    } label: {
+                        Label("Resume Task", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+
+            Divider()
+
+            Button {
+                editedName = session.name
+                isEditing = true
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+
+            if isCompleted {
+                Button {
+                    session.isCompleted = false
+                    session.completedAt = nil
+                } label: {
+                    Label("Reopen Task", systemImage: "arrow.uturn.backward")
+                }
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                if windowState.activeSession?.id == session.id {
+                    windowState.activeSession = nil
+                }
+                appState.removeController(for: session)
+                modelContext.delete(session)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
         .sheet(isPresented: $showingTaskDetail) {
             TaskDetailView(session: session, project: project, isPresented: $showingTaskDetail)
