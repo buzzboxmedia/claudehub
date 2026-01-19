@@ -20,7 +20,7 @@ class TaskFolderService {
     private let clientsBasePath: String
 
     private init() {
-        clientsBasePath = NSString("~/Library/CloudStorage/Dropbox/Buzzbox/clients").expandingTildeInPath
+        clientsBasePath = NSString("~/Library/CloudStorage/Dropbox/Buzzbox/Clients").expandingTildeInPath
     }
 
     // MARK: - Path Helpers

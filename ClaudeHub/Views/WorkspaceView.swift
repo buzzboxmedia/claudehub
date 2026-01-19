@@ -162,10 +162,11 @@ struct SessionSidebar: View {
         }
     }
 
-    /// Extract client name from path like ~/Dropbox/Buzzbox/clients/INFAB
+    /// Extract client name from path like ~/Dropbox/Buzzbox/Clients/INFAB
     func extractClientName(from path: String) -> String? {
         let components = path.components(separatedBy: "/")
-        if let clientsIndex = components.firstIndex(of: "clients"),
+        // Case-insensitive search for "Clients" folder
+        if let clientsIndex = components.firstIndex(where: { $0.lowercased() == "clients" }),
            clientsIndex + 1 < components.count {
             return components[clientsIndex + 1]
         }
@@ -1203,7 +1204,7 @@ struct TaskRow: View {
         } else {
             // Fallback: try old TaskFileService for legacy tasks
             let components = project.path.components(separatedBy: "/")
-            guard let clientsIndex = components.firstIndex(of: "clients"),
+            guard let clientsIndex = components.firstIndex(where: { $0.lowercased() == "clients" }),
                   clientsIndex + 1 < components.count else {
                 return
             }
@@ -1670,7 +1671,7 @@ struct LogTaskSheet: View {
     /// Extract client name from project path
     var clientName: String? {
         let components = project.path.components(separatedBy: "/")
-        if let clientsIndex = components.firstIndex(of: "clients"),
+        if let clientsIndex = components.firstIndex(where: { $0.lowercased() == "clients" }),
            clientsIndex + 1 < components.count {
             return components[clientsIndex + 1]
         }
