@@ -72,7 +72,8 @@ struct TerminalView: View {
                             in: session.projectPath,
                             sessionId: session.id,
                             claudeSessionId: session.claudeSessionId,
-                            parkerBriefing: session.parkerBriefing
+                            parkerBriefing: session.parkerBriefing,
+                            taskFolderPath: session.taskFolderPath
                         )
                         // Start waiting state monitor
                         terminalController.startWaitingStateMonitor(session: session, appState: appState)
@@ -504,7 +505,7 @@ class TerminalController: ObservableObject {
         return truncated
     }
 
-    func startClaude(in directory: String, sessionId: UUID, claudeSessionId: String? = nil, parkerBriefing: String? = nil) {
+    func startClaude(in directory: String, sessionId: UUID, claudeSessionId: String? = nil, parkerBriefing: String? = nil, taskFolderPath: String? = nil) {
         logger.info("startClaude called for directory: \(directory), sessionId: \(sessionId), claudeSessionId: \(claudeSessionId ?? "none")")
 
         // Don't restart if already running for this session
@@ -554,15 +555,15 @@ class TerminalController: ObservableObject {
 
                 // Small delay before starting Claude so briefing is visible
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.startClaudeCommand(in: directory, claudeSessionId: claudeSessionId)
+                    self?.startClaudeCommand(in: directory, claudeSessionId: claudeSessionId, taskFolderPath: taskFolderPath)
                 }
             } else {
-                self?.startClaudeCommand(in: directory, claudeSessionId: claudeSessionId)
+                self?.startClaudeCommand(in: directory, claudeSessionId: claudeSessionId, taskFolderPath: taskFolderPath)
             }
         }
     }
 
-    private func startClaudeCommand(in directory: String, claudeSessionId: String?) {
+    private func startClaudeCommand(in directory: String, claudeSessionId: String?, taskFolderPath: String? = nil) {
         // Always start fresh - Claude's --resume picker doesn't work well with SwiftTerm
         let claudeCommand = "cd '\(directory)' && claude --dangerously-skip-permissions\n"
         logger.info("Starting Claude session in: \(directory)")
@@ -576,6 +577,36 @@ class TerminalController: ObservableObject {
                 window.makeFirstResponder(terminal)
             }
         }
+
+        // Send task context after Claude is ready
+        if let taskPath = taskFolderPath {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.sendTaskContext(from: taskPath)
+            }
+        }
+    }
+
+    /// Read TASK.md and send context to Claude
+    private func sendTaskContext(from taskFolderPath: String) {
+        let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
+
+        guard FileManager.default.fileExists(atPath: taskFile.path),
+              let content = try? String(contentsOf: taskFile, encoding: .utf8) else {
+            logger.info("No TASK.md found at \(taskFile.path)")
+            return
+        }
+
+        // Build the initial prompt with task context
+        let prompt = """
+        Here's the task I'm working on:
+
+        \(content)
+
+        Please review this task and let me know you understand. Then wait for my instructions.
+        """
+
+        logger.info("Sending task context from \(taskFile.path)")
+        sendToTerminal(prompt + "\n")
     }
 
     private func configureTerminal() {
