@@ -50,9 +50,6 @@ fi
 # Copy executable (update in place)
 cp ".build/debug/$APP_NAME" "$APP_PATH/Contents/MacOS/"
 
-# Copy entitlements
-cp "$SCRIPT_DIR/ClaudeHub.entitlements" "$APP_PATH/Contents/"
-
 # Copy icon
 if [ -f "$SCRIPT_DIR/ClaudeHub/Resources/AppIcon.icns" ]; then
     mkdir -p "$APP_PATH/Contents/Resources"
@@ -89,7 +86,7 @@ PLIST
 
 # Sign the app with entitlements for CloudKit (after Info.plist exists)
 echo "Signing with entitlements..."
-codesign --force --sign - --entitlements "$APP_PATH/Contents/ClaudeHub.entitlements" "$APP_PATH"
+codesign --force --sign - --entitlements "$SCRIPT_DIR/ClaudeHub.entitlements" "$APP_PATH"
 
 # Register with Launch Services
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_PATH"
