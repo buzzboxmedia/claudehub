@@ -22,13 +22,11 @@ struct ClaudeHubApp: App {
             ProjectGroup.self
         ])
 
-        // For now, use local storage. To enable CloudKit sync, change to:
-        // cloudKitDatabase: .private("iCloud.com.buzzbox.claudehub")
+        // CloudKit sync enabled - sessions sync across all Macs signed into same iCloud
         let config = ModelConfiguration(
             schema: schema,
-            isStoredInMemoryOnly: false
-            // Uncomment when CloudKit is set up in Xcode:
-            // cloudKitDatabase: .private("iCloud.com.buzzbox.claudehub")
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private("iCloud.com.buzzbox.claudehub")
         )
 
         do {

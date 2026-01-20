@@ -50,6 +50,13 @@ fi
 # Copy executable (update in place)
 cp ".build/debug/$APP_NAME" "$APP_PATH/Contents/MacOS/"
 
+# Copy entitlements
+cp "$SCRIPT_DIR/ClaudeHub.entitlements" "$APP_PATH/Contents/"
+
+# Sign the app with entitlements for CloudKit
+echo "Signing with entitlements..."
+codesign --force --sign - --entitlements "$APP_PATH/Contents/ClaudeHub.entitlements" "$APP_PATH"
+
 # Copy icon
 if [ -f "$SCRIPT_DIR/ClaudeHub/Resources/AppIcon.icns" ]; then
     mkdir -p "$APP_PATH/Contents/Resources"

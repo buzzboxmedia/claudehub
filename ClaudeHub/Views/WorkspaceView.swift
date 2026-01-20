@@ -388,6 +388,34 @@ struct SessionSidebar: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+
+                            // Import Tasks button
+                            let importCount = TaskImportService.shared.countImportableTasks(for: project)
+                            if importCount > 0 {
+                                Button {
+                                    let imported = TaskImportService.shared.importTasks(for: project, modelContext: modelContext)
+                                    if imported > 0 {
+                                        print("Imported \(imported) tasks")
+                                    }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "square.and.arrow.down")
+                                            .font(.system(size: 11, weight: .medium))
+                                        Text("Import (\(importCount))")
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                    .foregroundStyle(.orange)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.orange.opacity(0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         .padding(.horizontal, 16)
 
@@ -1126,6 +1154,24 @@ struct TaskRow: View {
             session.isCompleted = true
             session.completedAt = Date()
 
+            // Move task folder to completed directory
+            if let taskFolderPath = session.taskFolderPath {
+                do {
+                    try TaskFolderService.shared.updateTaskStatus(
+                        at: URL(fileURLWithPath: taskFolderPath),
+                        status: "done"
+                    )
+                    if let newPath = try TaskFolderService.shared.moveToCompleted(
+                        taskFolderPath: taskFolderPath,
+                        projectPath: project.path
+                    ) {
+                        session.taskFolderPath = newPath.path
+                    }
+                } catch {
+                    print("Failed to move task to completed: \(error)")
+                }
+            }
+
             if windowState.activeSession?.id == session.id {
                 windowState.activeSession = nil
             }
@@ -1153,12 +1199,20 @@ struct TaskRow: View {
                     try content.write(to: taskFile, atomically: true, encoding: .utf8)
                 }
 
-                // Update status if completed
+                // Update status if completed and move to completed folder
                 if isCompleted {
                     try TaskFolderService.shared.updateTaskStatus(
                         at: folderURL,
                         status: "done"
                     )
+
+                    // Move task folder to completed directory
+                    if let newPath = try TaskFolderService.shared.moveToCompleted(
+                        taskFolderPath: taskFolderPath,
+                        projectPath: project.path
+                    ) {
+                        session.taskFolderPath = newPath.path
+                    }
                 }
             } catch {
                 print("Failed to save to task file: \(error)")

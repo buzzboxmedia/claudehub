@@ -536,6 +536,50 @@ class TaskFolderService {
         try content.write(to: taskFile, atomically: true, encoding: .utf8)
         logger.info("Moved task to \(newFolder.path)")
     }
+
+    // MARK: - Completed Tasks
+
+    /// Get the completed tasks directory for a project
+    func completedDirectory(for projectPath: String) -> URL {
+        tasksDirectory(for: projectPath)
+            .appendingPathComponent("completed")
+    }
+
+    /// Move a task folder to the completed directory
+    /// Returns the new path if successful
+    func moveToCompleted(taskFolderPath: String, projectPath: String) throws -> URL? {
+        let sourceFolder = URL(fileURLWithPath: taskFolderPath)
+
+        guard fileManager.fileExists(atPath: sourceFolder.path) else {
+            logger.warning("Task folder doesn't exist: \(taskFolderPath)")
+            return nil
+        }
+
+        // Create completed directory if needed
+        let completedDir = completedDirectory(for: projectPath)
+        if !fileManager.fileExists(atPath: completedDir.path) {
+            try fileManager.createDirectory(at: completedDir, withIntermediateDirectories: true)
+        }
+
+        // Move to completed folder (keep the same folder name)
+        let destFolder = completedDir.appendingPathComponent(sourceFolder.lastPathComponent)
+
+        // Handle case where folder already exists in completed
+        var finalDest = destFolder
+        var suffix = 1
+        while fileManager.fileExists(atPath: finalDest.path) {
+            finalDest = completedDir.appendingPathComponent("\(sourceFolder.lastPathComponent)-\(suffix)")
+            suffix += 1
+        }
+
+        try fileManager.moveItem(at: sourceFolder, to: finalDest)
+
+        // Update status in TASK.md
+        try updateTaskStatus(at: finalDest, status: "completed")
+
+        logger.info("Moved task to completed: \(finalDest.path)")
+        return finalDest
+    }
 }
 
 // MARK: - Data Models
