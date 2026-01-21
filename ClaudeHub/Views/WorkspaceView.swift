@@ -10,8 +10,8 @@ struct WorkspaceView: View {
     // Track when this workspace was opened (for unsaved progress check)
     @State private var workspaceOpenedAt: Date = Date()
     @State private var showUnsavedAlert = false
-    @State private var showSaveNoteBeforeClose = false
     @State private var pendingCloseSession: Session?
+    @State private var isSummarizingBeforeClose = false
 
     // Use the project's sessions relationship instead of a separate query
     var sessions: [Session] {
@@ -51,6 +51,47 @@ struct WorkspaceView: View {
         }
     }
 
+    private func summarizeAndClose(session: Session) {
+        guard let taskFolderPath = session.taskFolderPath else {
+            performGoBack()
+            return
+        }
+
+        isSummarizingBeforeClose = true
+
+        // Get terminal content
+        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+
+        // Call Claude API to generate summary
+        ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
+            defer {
+                isSummarizingBeforeClose = false
+                performGoBack()
+            }
+
+            guard let summary = summary else { return }
+
+            // Save to TASK.md
+            let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
+
+            do {
+                var content = try String(contentsOf: taskFile, encoding: .utf8)
+
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+                let timestamp = dateFormatter.string(from: Date())
+
+                content += "\n### \(timestamp)\n\(summary)\n"
+                try content.write(to: taskFile, atomically: true, encoding: .utf8)
+
+                session.lastProgressSavedAt = Date()
+                session.lastSessionSummary = summary
+            } catch {
+                print("Failed to save summary: \(error)")
+            }
+        }
+    }
+
     var body: some View {
         HSplitView {
             // Sidebar
@@ -68,6 +109,12 @@ struct WorkspaceView: View {
         .onAppear {
             workspaceOpenedAt = Date()
 
+            // Auto-import any existing task folders
+            let imported = TaskImportService.shared.importTasks(for: project, modelContext: modelContext)
+            if imported > 0 {
+                print("Auto-imported \(imported) tasks")
+            }
+
             if project.sessions.isEmpty {
                 // No sessions, create a generic one
                 let newSession = createSession(name: nil, inGroup: nil)
@@ -77,33 +124,37 @@ struct WorkspaceView: View {
                 windowState.activeSession = project.sessions.first
             }
         }
-        .alert("Save progress before closing?", isPresented: $showUnsavedAlert) {
+        .alert("Summarize before leaving?", isPresented: $showUnsavedAlert) {
             Button("Don't Save") {
                 performGoBack()
             }
-            Button("Add Note") {
-                showSaveNoteBeforeClose = true
+            Button("Summarize & Close") {
+                if let session = pendingCloseSession {
+                    summarizeAndClose(session: session)
+                }
             }
             .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) {}
         } message: {
             if let session = pendingCloseSession {
-                Text("You haven't saved a progress note for \"\(session.name)\" this session.")
+                Text("Save an AI summary for \"\(session.name)\" before closing?")
             }
         }
-        .sheet(isPresented: $showSaveNoteBeforeClose) {
-            if let session = pendingCloseSession {
-                SaveNoteSheetWrapper(
-                    session: session,
-                    project: project,
-                    onSave: {
-                        showSaveNoteBeforeClose = false
-                        performGoBack()
-                    },
-                    onCancel: {
-                        showSaveNoteBeforeClose = false
+        .overlay {
+            if isSummarizingBeforeClose {
+                ZStack {
+                    Color.black.opacity(0.5)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Summarizing...")
+                            .font(.system(size: 14, weight: .medium))
                     }
-                )
+                    .padding(24)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .ignoresSafeArea()
             }
         }
     }
@@ -146,7 +197,6 @@ struct SessionSidebar: View {
     @State private var isCreatingTask = false
     @State private var isCreatingGroup = false
     @State private var newTaskName = ""
-    @State private var newTaskDescription = ""
     @State private var newGroupName = ""
     @State private var selectedGroupForNewTask: ProjectGroup?
     @State private var draggedGroupId: UUID?
@@ -178,11 +228,9 @@ struct SessionSidebar: View {
 
     func createTask() {
         let name = newTaskName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let description = newTaskDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             isCreatingTask = false
             newTaskName = ""
-            newTaskDescription = ""
             selectedGroupForNewTask = nil
             return
         }
@@ -192,7 +240,6 @@ struct SessionSidebar: View {
             projectPath: project.path,
             userNamed: true
         )
-        session.sessionDescription = description.isEmpty ? nil : description
         session.project = project
         session.taskGroup = selectedGroupForNewTask
         modelContext.insert(session)
@@ -200,7 +247,6 @@ struct SessionSidebar: View {
         windowState.activeSession = session
         isCreatingTask = false
         newTaskName = ""
-        newTaskDescription = ""
 
         // Create task folder with TASK.md
         let subProjectName = selectedGroupForNewTask?.name
@@ -213,7 +259,7 @@ struct SessionSidebar: View {
                     projectName: project.name,
                     subProjectName: subProjectName,
                     taskName: name,
-                    description: description.isEmpty ? nil : description
+                    description: nil
                 )
                 // Link session to task folder
                 await MainActor.run {
@@ -325,51 +371,21 @@ struct SessionSidebar: View {
                         HStack(spacing: 8) {
                             // New Task button
                             if isCreatingTask {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .foregroundStyle(.blue)
+                                HStack(spacing: 8) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.blue)
 
-                                        TextField("Task name...", text: $newTaskName)
-                                            .textFieldStyle(.plain)
-                                            .font(.system(size: 13))
-                                            .focused($isTaskFieldFocused)
-                                            .onSubmit { createTask() }
-                                            .onExitCommand {
-                                                isCreatingTask = false
-                                                newTaskName = ""
-                                                newTaskDescription = ""
-                                                selectedGroupForNewTask = nil
-                                            }
-                                    }
-
-                                    TextField("Description (optional)...", text: $newTaskDescription)
+                                    TextField("Task name...", text: $newTaskName)
                                         .textFieldStyle(.plain)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
+                                        .font(.system(size: 13))
+                                        .focused($isTaskFieldFocused)
                                         .onSubmit { createTask() }
-
-                                    HStack {
-                                        Button("Cancel") {
+                                        .onExitCommand {
                                             isCreatingTask = false
                                             newTaskName = ""
-                                            newTaskDescription = ""
+                                            selectedGroupForNewTask = nil
                                         }
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                        .buttonStyle(.plain)
-
-                                        Spacer()
-
-                                        Button("Create") {
-                                            createTask()
-                                        }
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(.blue)
-                                        .buttonStyle(.plain)
-                                        .disabled(newTaskName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                    }
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 10)
@@ -452,33 +468,6 @@ struct SessionSidebar: View {
                                 .buttonStyle(.plain)
                             }
 
-                            // Import Tasks button
-                            let importCount = TaskImportService.shared.countImportableTasks(for: project)
-                            if importCount > 0 {
-                                Button {
-                                    let imported = TaskImportService.shared.importTasks(for: project, modelContext: modelContext)
-                                    if imported > 0 {
-                                        print("Imported \(imported) tasks")
-                                    }
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Image(systemName: "square.and.arrow.down")
-                                            .font(.system(size: 11, weight: .medium))
-                                        Text("Import (\(importCount))")
-                                            .font(.system(size: 12, weight: .medium))
-                                    }
-                                    .foregroundStyle(.orange)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Color.orange.opacity(0.1))
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
                         }
                         .padding(.horizontal, 16)
 
@@ -1344,21 +1333,18 @@ struct TerminalHeader: View {
     @EnvironmentObject var appState: AppState
     let session: Session
     let project: Project
-    @Binding var showLogSheet: Bool
-    @Binding var showSaveNotePopover: Bool
-    @State private var isLogHovered = false
-    @State private var isSaveNoteHovered = false
+    @State private var isSummarizing = false
+    @State private var showSavedConfirmation = false
+    @State private var isButtonHovered = false
 
     var body: some View {
         HStack(spacing: 14) {
-            // Status indicator (static to avoid layout thrashing)
+            // Status indicator
             ZStack {
-                // Outer glow ring
                 Circle()
                     .fill(Color.green.opacity(0.2))
                     .frame(width: 18, height: 18)
 
-                // Core dot
                 Circle()
                     .fill(Color.green)
                     .frame(width: 8, height: 8)
@@ -1366,54 +1352,32 @@ struct TerminalHeader: View {
             }
             .frame(width: 20, height: 20)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(session.name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                if let description = session.sessionDescription, !description.isEmpty {
-                    Text(description)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
+            // Session name
+            Text(session.name)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
             Spacer()
 
-            // Save Note button (📌)
+            // Summarize & Save button
             Button {
-                showSaveNotePopover = true
-            } label: {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(isSaveNoteHovered ? .blue : .secondary)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        Circle()
-                            .fill(isSaveNoteHovered ? Color.blue.opacity(0.15) : Color.white.opacity(0.08))
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(isSaveNoteHovered ? Color.blue.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 1)
-                    )
-                    .scaleEffect(isSaveNoteHovered ? 1.05 : 1.0)
-            }
-            .buttonStyle(.plain)
-            .onHover { isSaveNoteHovered = $0 }
-            .help("Save a progress note")
-
-            // Log Task button
-            Button {
-                showLogSheet = true
+                summarizeAndSave()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 12, weight: .medium))
-                    Text("Log Task")
+                    if isSummarizing {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .frame(width: 14, height: 14)
+                    } else if showSavedConfirmation {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                    } else {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    Text(showSavedConfirmation ? "Saved" : "Summarize & Save")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(.white)
@@ -1421,19 +1385,23 @@ struct TerminalHeader: View {
                 .padding(.vertical, 7)
                 .background(
                     LinearGradient(
-                        colors: [Color.blue, Color.blue.opacity(0.8)],
+                        colors: showSavedConfirmation
+                            ? [Color.green, Color.green.opacity(0.8)]
+                            : [Color.blue, Color.blue.opacity(0.8)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
                 .clipShape(Capsule())
-                .shadow(color: Color.blue.opacity(isLogHovered ? 0.5 : 0.3), radius: isLogHovered ? 8 : 4)
-                .scaleEffect(isLogHovered ? 1.03 : 1.0)
+                .shadow(color: (showSavedConfirmation ? Color.green : Color.blue).opacity(isButtonHovered ? 0.5 : 0.3), radius: isButtonHovered ? 8 : 4)
+                .scaleEffect(isButtonHovered ? 1.03 : 1.0)
             }
             .buttonStyle(.plain)
-            .onHover { isLogHovered = $0 }
+            .onHover { isButtonHovered = $0 }
+            .disabled(isSummarizing || session.taskFolderPath == nil)
+            .help(session.taskFolderPath == nil ? "No task folder linked" : "Generate AI summary and save to TASK.md")
 
-            // Running status badge
+            // Running badge
             HStack(spacing: 5) {
                 Circle()
                     .fill(Color.green)
@@ -1455,10 +1423,7 @@ struct TerminalHeader: View {
         .padding(.vertical, 12)
         .background(
             ZStack {
-                // Frosted glass base
                 VisualEffectView(material: .headerView, blendingMode: .withinWindow)
-
-                // Subtle top highlight
                 LinearGradient(
                     colors: [Color.white.opacity(0.08), Color.clear],
                     startPoint: .top,
@@ -1468,105 +1433,97 @@ struct TerminalHeader: View {
         )
     }
 
+    private func summarizeAndSave() {
+        guard let taskFolderPath = session.taskFolderPath else { return }
+
+        isSummarizing = true
+
+        // Get terminal content
+        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+
+        // Call Claude API to generate summary
+        ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
+            guard let summary = summary else {
+                isSummarizing = false
+                return
+            }
+
+            // Save to TASK.md
+            let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
+
+            do {
+                var content = try String(contentsOf: taskFile, encoding: .utf8)
+
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+                let timestamp = dateFormatter.string(from: Date())
+
+                content += "\n### \(timestamp)\n\(summary)\n"
+                try content.write(to: taskFile, atomically: true, encoding: .utf8)
+
+                // Update session
+                session.lastProgressSavedAt = Date()
+                session.lastSessionSummary = summary
+
+                isSummarizing = false
+                showSavedConfirmation = true
+
+                // Reset confirmation after 2 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    showSavedConfirmation = false
+                }
+            } catch {
+                print("Failed to save summary: \(error)")
+                isSummarizing = false
+            }
+        }
+    }
+
 }
 
 struct TerminalArea: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var windowState: WindowState
-    @StateObject private var progressManager = ProgressNoteManager.shared
     let project: Project
-    @State private var showLogSheet = false
-    @State private var showSaveNotePopover = false
-    @State private var showProgressReminder = false
-    @State private var reminderTimer: Timer?
 
     var body: some View {
         Group {
             if let session = windowState.activeSession {
-                ZStack(alignment: .bottom) {
-                    VStack(spacing: 0) {
-                        TerminalHeader(session: session, project: project, showLogSheet: $showLogSheet, showSaveNotePopover: $showSaveNotePopover)
+                VStack(spacing: 0) {
+                    TerminalHeader(session: session, project: project)
 
-                        // Subtle separator line with gradient
-                        Rectangle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.2), Color.blue.opacity(0.3)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
+                    // Subtle separator line with gradient
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.2), Color.blue.opacity(0.3)],
+                                startPoint: .leading,
+                                endPoint: .trailing
                             )
-                            .frame(height: 1)
-
-                        TerminalView(session: session)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.2),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.1)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-                    .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 6)
-                    .shadow(color: Color.blue.opacity(0.1), radius: 20, x: 0, y: 0)
-                    .padding(14)
-                    .sheet(isPresented: $showLogSheet) {
-                        LogTaskSheet(session: session, project: project, isPresented: $showLogSheet)
-                    }
-                    .popover(isPresented: $showSaveNotePopover, arrowEdge: .top) {
-                        SaveNotePopover(
-                            session: session,
-                            project: project,
-                            onSave: {
-                                showSaveNotePopover = false
-                                showProgressReminder = false
-                                progressManager.noteSaved(for: session)
-                            },
-                            onCancel: {
-                                showSaveNotePopover = false
-                            }
                         )
-                    }
+                        .frame(height: 1)
 
-                    // Progress reminder toast
-                    if showProgressReminder {
-                        ProgressReminderToast(
-                            onAddNote: {
-                                showProgressReminder = false
-                                showSaveNotePopover = true
-                            },
-                            onDismiss: {
-                                showProgressReminder = false
-                                progressManager.dismissReminder(for: session)
-                            }
+                    TerminalView(session: session)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.2),
+                                    Color.white.opacity(0.05),
+                                    Color.white.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
                         )
-                        .padding(.bottom, 24)
-                        .padding(.horizontal, 40)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .onAppear {
-                    startReminderTimer(for: session)
-                }
-                .onDisappear {
-                    stopReminderTimer()
-                }
-                .onChange(of: windowState.activeSession?.id) { _, _ in
-                    // Reset when switching sessions
-                    showProgressReminder = false
-                    if let newSession = windowState.activeSession {
-                        startReminderTimer(for: newSession)
-                    }
-                }
+                )
+                .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 6)
+                .shadow(color: Color.blue.opacity(0.1), radius: 20, x: 0, y: 0)
+                .padding(14)
             } else {
                 // Enhanced empty state
                 VStack(spacing: 20) {
@@ -1612,353 +1569,6 @@ struct TerminalArea: View {
                         )
                     }
                 )
-            }
-        }
-    }
-
-    // MARK: - Reminder Timer
-
-    private func startReminderTimer(for session: Session) {
-        stopReminderTimer()
-
-        // Check immediately
-        checkReminder(for: session)
-
-        // Then check every minute
-        reminderTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
-            checkReminder(for: session)
-        }
-    }
-
-    private func stopReminderTimer() {
-        reminderTimer?.invalidate()
-        reminderTimer = nil
-    }
-
-    private func checkReminder(for session: Session) {
-        if progressManager.shouldShowReminder(for: session) {
-            withAnimation(.spring(response: 0.4)) {
-                showProgressReminder = true
-            }
-
-            // Auto-dismiss after 10 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-                if showProgressReminder {
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        showProgressReminder = false
-                    }
-                    progressManager.dismissReminder(for: session)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Log Task Sheet
-
-struct LogTaskSheet: View {
-    @EnvironmentObject var appState: AppState
-    let session: Session
-    let project: Project
-    @Binding var isPresented: Bool
-
-    // Form fields
-    @State private var billableDescription: String = ""
-    @State private var estimatedHours: String = ""
-    @State private var actualHours: String = ""
-    @State private var notes: String = ""
-
-    // State
-    @State private var isGenerating = true
-    @State private var isSaving = false
-    @State private var saveError: String?
-    @State private var savedSuccessfully = false
-
-    var canSave: Bool {
-        !billableDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !actualHours.isEmpty &&
-        Double(actualHours) != nil &&
-        !isSaving
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Log Task")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text(session.name)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    isPresented = false
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding()
-            .background(.ultraThinMaterial)
-
-            Divider()
-
-            // Content
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Billable Description
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Billable Description")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-
-                        if isGenerating {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                Text("Generating summary...")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(height: 32)
-                        } else {
-                            TextField("e.g., Designed social media graphics", text: $billableDescription)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                                .padding(10)
-                                .background(Color.black.opacity(0.2))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                )
-                        }
-                    }
-
-                    // Hours row
-                    HStack(spacing: 16) {
-                        // Estimated Hours
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Est. Hours")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-
-                            TextField("0.5", text: $estimatedHours)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                                .padding(10)
-                                .frame(width: 80)
-                                .background(Color.black.opacity(0.2))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                )
-                        }
-
-                        // Actual Hours
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Actual Hours *")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-
-                            TextField("0.5", text: $actualHours)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                                .padding(10)
-                                .frame(width: 80)
-                                .background(Color.black.opacity(0.2))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(actualHours.isEmpty ? Color.orange.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                )
-                        }
-
-                        Spacer()
-                    }
-
-                    // Notes (optional)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Notes (optional)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-
-                        TextEditor(text: $notes)
-                            .font(.system(size: 13))
-                            .frame(minHeight: 60)
-                            .padding(8)
-                            .background(Color.black.opacity(0.2))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                            )
-                    }
-
-                    if let error = saveError {
-                        Text(error)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.red)
-                    }
-
-                    if savedSuccessfully {
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("Task logged successfully!")
-                                .foregroundStyle(.green)
-                        }
-                        .font(.system(size: 12))
-                    }
-                }
-                .padding()
-            }
-
-            Divider()
-
-            // Footer
-            HStack {
-                Button("Cancel") {
-                    isPresented = false
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button {
-                    saveLog()
-                } label: {
-                    if isSaving {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .frame(width: 60)
-                    } else {
-                        Text("Save Log")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canSave)
-            }
-            .padding()
-        }
-        .frame(width: 500, height: 420)
-        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-        .onAppear {
-            generateSummary()
-        }
-    }
-
-    func generateSummary() {
-        // Get terminal content from the session's controller
-        guard let controller = appState.terminalControllers[session.id] else {
-            isGenerating = false
-            billableDescription = session.name
-            estimatedHours = "0.5"
-            return
-        }
-
-        let content = controller.getTerminalContent()
-
-        if content.isEmpty {
-            isGenerating = false
-            billableDescription = session.name
-            estimatedHours = "0.5"
-            return
-        }
-
-        ClaudeAPI.shared.generateBillableSummary(from: content, taskName: session.name) { summary in
-            isGenerating = false
-            if let summary = summary {
-                billableDescription = summary.description
-                estimatedHours = String(format: "%.2f", summary.estimatedHours)
-            } else {
-                // Fallback to task name
-                billableDescription = session.name
-                estimatedHours = "0.5"
-            }
-        }
-    }
-
-    /// Extract client name from project path
-    var clientName: String? {
-        let components = project.path.components(separatedBy: "/")
-        if let clientsIndex = components.firstIndex(where: { $0.lowercased() == "clients" }),
-           clientsIndex + 1 < components.count {
-            return components[clientsIndex + 1]
-        }
-        return nil
-    }
-
-    func saveLog() {
-        guard canSave else { return }
-
-        isSaving = true
-        saveError = nil
-
-        let estHrs = Double(estimatedHours) ?? 0.5
-        let actHrs = Double(actualHours) ?? 0.5
-
-        Task {
-            // Save locally first - this is the critical part
-            session.lastSessionSummary = billableDescription
-
-            // Also save to task markdown file
-            if let clientName = clientName {
-                do {
-                    try TaskFileService.shared.appendSessionSummary(
-                        clientName: clientName,
-                        taskName: session.name,
-                        summary: billableDescription
-                    )
-                } catch {
-                    print("Failed to save to task file: \(error)")
-                }
-            }
-
-            // Sync to Google Sheets billing (optional, may fail)
-            do {
-                let result = try await GoogleSheetsService.shared.logBilling(
-                    client: project.name,
-                    project: nil,
-                    task: session.name,
-                    description: billableDescription,
-                    estHours: estHrs,
-                    actualHours: actHrs,
-                    status: "billed"
-                )
-
-                await MainActor.run {
-                    isSaving = false
-                    savedSuccessfully = true
-
-                    if result.success {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                            isPresented = false
-                        }
-                    } else {
-                        saveError = "Saved locally. Billing sync: \(result.error ?? "unknown error")"
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            isPresented = false
-                        }
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    savedSuccessfully = true
-                    saveError = "Saved locally. Billing sync failed."
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        isPresented = false
-                    }
-                }
             }
         }
     }

@@ -585,7 +585,7 @@ class TerminalController: ObservableObject {
 
         // Send task context after Claude is ready
         if let taskPath = taskFolderPath {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
                 self?.sendTaskContext(from: taskPath)
             }
         }
@@ -607,7 +607,7 @@ class TerminalController: ObservableObject {
 
         \(content)
 
-        Please review this task and let me know you understand. Then wait for my instructions.
+        Please continue from where we left off, or if this is a new session, review this task and let me know you understand.
         """
 
         logger.info("Sending task context from \(taskFile.path)")
