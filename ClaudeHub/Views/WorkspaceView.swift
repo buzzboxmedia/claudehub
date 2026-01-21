@@ -1058,12 +1058,25 @@ struct TaskRow: View {
                     .help("Complete this task")
                 }
 
-                // Delete button
+                // Delete button - moves task to completed folder so it won't reimport
                 Button {
                     if windowState.activeSession?.id == session.id {
                         windowState.activeSession = nil
                     }
                     appState.removeController(for: session)
+
+                    // Move task folder to completed/ so it won't be reimported
+                    if let taskFolderPath = session.taskFolderPath {
+                        do {
+                            _ = try TaskFolderService.shared.moveToCompleted(
+                                taskFolderPath: taskFolderPath,
+                                projectPath: session.projectPath
+                            )
+                        } catch {
+                            print("Failed to move task to completed: \(error)")
+                        }
+                    }
+
                     modelContext.delete(session)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -1073,7 +1086,7 @@ struct TaskRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Delete this task")
+                .help("Archive this task")
             }
             .opacity(isHovered && !isEditing ? 1 : 0)
         }
