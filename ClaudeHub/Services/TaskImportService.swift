@@ -91,6 +91,7 @@ class TaskImportService {
     }
 
     /// Find all task folders (those with TASK.md) in a directory, recursively
+    /// Skips the "completed" and "archive" folders to prevent reimporting archived tasks
     private func findTaskFolders(in directory: URL) -> [URL] {
         var taskFolders: [URL] = []
 
@@ -108,13 +109,19 @@ class TaskImportService {
                 continue
             }
 
+            let name = item.lastPathComponent
+
+            // Skip archive folders - don't reimport completed/archived tasks
+            if name == "completed" || name == "archive" {
+                continue
+            }
+
             let taskFile = item.appendingPathComponent("TASK.md")
             if fileManager.fileExists(atPath: taskFile.path) {
                 // This is a task folder
                 taskFolders.append(item)
             } else {
                 // Check if it's a sub-project folder (no number prefix)
-                let name = item.lastPathComponent
                 if !(name.first?.isNumber ?? false) {
                     // Recurse into sub-project folders
                     taskFolders.append(contentsOf: findTaskFolders(in: item))
