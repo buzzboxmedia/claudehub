@@ -739,9 +739,16 @@ class TerminalController: ObservableObject {
     }
 }
 
-// Flipped container to match SwiftUI's coordinate system
+// Container that manually sizes the terminal (like SwiftTerm's sample app)
 class TerminalHostView: NSView {
-    override var isFlipped: Bool { true }  // Match SwiftUI's coordinate system
+    weak var terminalView: LocalProcessTerminalView?
+
+    override func layout() {
+        super.layout()
+        // Set terminal frame directly - this is how SwiftTerm's sample app does it
+        terminalView?.frame = bounds
+        terminalView?.needsLayout = true
+    }
 }
 
 // SwiftUI wrapper for LocalProcessTerminalView
@@ -757,19 +764,13 @@ struct SwiftTermView: NSViewRepresentable {
         }
 
         let terminalView = controller.terminalView!
-        terminalView.translatesAutoresizingMaskIntoConstraints = false
+        container.terminalView = terminalView
 
         // Disable mouse reporting so text selection works
         terminalView.allowMouseReporting = false
 
+        // Add as subview - frame will be set in layout()
         container.addSubview(terminalView)
-
-        NSLayoutConstraint.activate([
-            terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            terminalView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            terminalView.topAnchor.constraint(equalTo: container.topAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-        ])
 
         // Auto-focus the terminal
         DispatchQueue.main.async {
@@ -780,7 +781,11 @@ struct SwiftTermView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        // Focus terminal when view updates
+        // Ensure terminal fills container on updates
+        if let container = nsView as? TerminalHostView {
+            container.terminalView?.frame = container.bounds
+        }
+        // Focus terminal
         if let terminalView = controller.terminalView, let window = nsView.window {
             window.makeFirstResponder(terminalView)
         }
