@@ -13,14 +13,15 @@ class TerminalLauncher {
 
     /// Launch Claude in Terminal.app for a session
     func launchClaude(for session: Session, appState: AppState) {
-        let projectPath = session.projectPath
+        // Use task folder as working directory if available (enables per-task session isolation)
+        let workingDir = session.taskFolderPath ?? session.projectPath
 
         // Build the claude command
-        var claudeCommand = "cd '\(projectPath)' && claude --dangerously-skip-permissions"
+        var claudeCommand = "cd '\(workingDir)' && claude --dangerously-skip-permissions"
 
         // Resume existing session if we have a session ID
         if let claudeSessionId = session.claudeSessionId {
-            claudeCommand = "cd '\(projectPath)' && claude --dangerously-skip-permissions --resume '\(claudeSessionId)'"
+            claudeCommand = "cd '\(workingDir)' && claude --dangerously-skip-permissions --resume '\(claudeSessionId)'"
         }
 
         logger.info("Launching Terminal.app with: \(claudeCommand)")
@@ -54,7 +55,9 @@ class TerminalLauncher {
 
     /// Capture the Claude session ID from disk
     func captureClaudeSessionId(for session: Session) {
-        let claudeProjectPath = session.projectPath.replacingOccurrences(of: "/", with: "-")
+        // Use task folder path if available (matches where Claude was started)
+        let workingPath = session.taskFolderPath ?? session.projectPath
+        let claudeProjectPath = workingPath.replacingOccurrences(of: "/", with: "-")
         let claudeProjectsDir = "\(NSHomeDirectory())/.claude/projects/\(claudeProjectPath)"
 
         logger.info("Looking for Claude session in: \(claudeProjectsDir)")
@@ -90,7 +93,9 @@ class TerminalLauncher {
             return ""
         }
 
-        let claudeProjectPath = session.projectPath.replacingOccurrences(of: "/", with: "-")
+        // Use task folder path if available (matches where Claude was started)
+        let workingPath = session.taskFolderPath ?? session.projectPath
+        let claudeProjectPath = workingPath.replacingOccurrences(of: "/", with: "-")
         let sessionFile = "\(NSHomeDirectory())/.claude/projects/\(claudeProjectPath)/\(claudeSessionId).jsonl"
 
         guard let content = try? String(contentsOfFile: sessionFile, encoding: .utf8) else {

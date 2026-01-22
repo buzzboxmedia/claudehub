@@ -165,9 +165,35 @@ class TaskFolderService {
         )
 
         try content.write(to: taskFile, atomically: true, encoding: .utf8)
+
+        // Create task-level CLAUDE.md with context paths for Claude Code
+        let claudeMdFile = taskFolder.appendingPathComponent("CLAUDE.md")
+        let claudeMdContent = generateClaudeMdContent(taskName: taskName, subProjectName: subProjectName)
+        try claudeMdContent.write(to: claudeMdFile, atomically: true, encoding: .utf8)
+
         logger.info("Created task folder: \(taskFolder.path)")
 
         return taskFolder
+    }
+
+    /// Generate CLAUDE.md content for task folder
+    func generateClaudeMdContent(taskName: String, subProjectName: String?) -> String {
+        // Calculate relative path to client root based on folder depth
+        let clientRoot = subProjectName != nil ? "../../../" : "../../"
+
+        return """
+        # Task: \(taskName)
+
+        ## Context Paths
+        - **Client root:** \(clientRoot)
+        - **Credentials:** \(clientRoot)credentials/
+
+        ## Task File
+        See TASK.md in this folder for task description, status, and progress log.
+
+        ---
+        *Parent CLAUDE.md files are automatically loaded for team and client context.*
+        """
     }
 
     /// Generate the TASK.md content
