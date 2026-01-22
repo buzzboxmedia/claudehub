@@ -739,32 +739,50 @@ class TerminalController: ObservableObject {
     }
 }
 
+// Flipped container to match SwiftUI's coordinate system
+class TerminalHostView: NSView {
+    override var isFlipped: Bool { true }  // Match SwiftUI's coordinate system
+}
+
 // SwiftUI wrapper for LocalProcessTerminalView
 struct SwiftTermView: NSViewRepresentable {
     @ObservedObject var controller: TerminalController
 
-    func makeNSView(context: Context) -> LocalProcessTerminalView {
+    func makeNSView(context: Context) -> NSView {
+        let container = TerminalHostView()
+        container.wantsLayer = true
+
         if controller.terminalView == nil {
             controller.terminalView = LocalProcessTerminalView(frame: .zero)
         }
 
         let terminalView = controller.terminalView!
+        terminalView.translatesAutoresizingMaskIntoConstraints = false
 
         // Disable mouse reporting so text selection works
         terminalView.allowMouseReporting = false
+
+        container.addSubview(terminalView)
+
+        NSLayoutConstraint.activate([
+            terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            terminalView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            terminalView.topAnchor.constraint(equalTo: container.topAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
 
         // Auto-focus the terminal
         DispatchQueue.main.async {
             terminalView.window?.makeFirstResponder(terminalView)
         }
 
-        return terminalView
+        return container
     }
 
-    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
+    func updateNSView(_ nsView: NSView, context: Context) {
         // Focus terminal when view updates
-        if let window = nsView.window {
-            window.makeFirstResponder(nsView)
+        if let terminalView = controller.terminalView, let window = nsView.window {
+            window.makeFirstResponder(terminalView)
         }
     }
 }
