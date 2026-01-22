@@ -119,9 +119,15 @@ struct WorkspaceView: View {
                 // No sessions, create a generic one
                 let newSession = createSession(name: nil, inGroup: nil)
                 windowState.activeSession = newSession
+                // Auto-launch Terminal.app with the new session
+                TerminalLauncher.shared.launchClaude(for: newSession, appState: appState)
             } else if windowState.activeSession == nil {
                 // Select the first session if none active
-                windowState.activeSession = project.sessions.first
+                if let firstSession = project.sessions.first {
+                    windowState.activeSession = firstSession
+                    // Auto-launch Terminal.app with the first session
+                    TerminalLauncher.shared.launchClaude(for: firstSession, appState: appState)
+                }
             }
         }
         .alert("Summarize before leaving?", isPresented: $showUnsavedAlert) {
@@ -1105,8 +1111,9 @@ struct TaskRow: View {
         }
         .onTapGesture(count: 1) {
             windowState.activeSession = session
-            // Clear waiting state when user views this session
             appState.clearSessionWaiting(session)
+            // Launch Terminal.app with this session
+            TerminalLauncher.shared.launchClaude(for: session, appState: appState)
         }
         .onHover { hovering in
             isHovered = hovering

@@ -124,26 +124,19 @@ class TerminalLauncher {
 }
 
 // MARK: - Session Info View
-// Shows session details and launch button instead of embedded terminal
+// Shows recent session activity (Terminal.app auto-launches on session/project click)
 
 struct TerminalView: View {
     let session: Session
     @EnvironmentObject var appState: AppState
-    @State private var isLaunching = false
     @State private var sessionContent: String = ""
     @State private var refreshTimer: Timer?
 
     var body: some View {
         VStack(spacing: 0) {
-            // Session content area
+            // Session content area - shows recent activity from Claude session file
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Session info header
-                    sessionInfoHeader
-
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-
                     // Recent activity from Claude session file
                     if !sessionContent.isEmpty {
                         recentActivitySection
@@ -153,12 +146,6 @@ struct TerminalView: View {
                 }
                 .padding(20)
             }
-
-            Divider()
-                .background(Color.white.opacity(0.1))
-
-            // Launch button bar
-            launchBar
         }
         .background(Color(NSColor(calibratedRed: 0.075, green: 0.082, blue: 0.11, alpha: 1.0)))
         .onAppear {
@@ -170,16 +157,14 @@ struct TerminalView: View {
         }
     }
 
-    private var sessionInfoHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.name)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+    private var recentActivitySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Recent Activity")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color(red: 0.6, green: 0.65, blue: 0.75))
 
-                Text(session.projectPath)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color(red: 0.5, green: 0.55, blue: 0.65))
+                Spacer()
 
                 if let claudeSessionId = session.claudeSessionId {
                     Text("Session: \(claudeSessionId.prefix(8))...")
@@ -187,28 +172,6 @@ struct TerminalView: View {
                         .foregroundColor(Color(red: 0.4, green: 0.5, blue: 0.6))
                 }
             }
-
-            Spacer()
-
-            // Status indicator
-            if appState.workingSessions.contains(session.id) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 8, height: 8)
-                    Text("Active")
-                        .font(.system(size: 11))
-                        .foregroundColor(.green)
-                }
-            }
-        }
-    }
-
-    private var recentActivitySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Recent Activity")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(Color(red: 0.6, green: 0.65, blue: 0.75))
 
             ScrollView {
                 Text(sessionContent)
@@ -229,63 +192,16 @@ struct TerminalView: View {
                 .font(.system(size: 48))
                 .foregroundColor(Color(red: 0.3, green: 0.4, blue: 0.5))
 
-            Text("No session activity yet")
+            Text("Session running in Terminal.app")
                 .font(.system(size: 14))
                 .foregroundColor(Color(red: 0.5, green: 0.55, blue: 0.65))
 
-            Text("Click 'Open in Terminal' to start")
+            Text("Activity will appear here once Claude starts")
                 .font(.system(size: 12))
                 .foregroundColor(Color(red: 0.4, green: 0.45, blue: 0.55))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
-    }
-
-    private var launchBar: some View {
-        HStack {
-            Spacer()
-
-            Button(action: launchInTerminal) {
-                HStack(spacing: 8) {
-                    if isLaunching {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    } else {
-                        Image(systemName: "terminal.fill")
-                    }
-                    Text("Open in Terminal")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(
-                    LinearGradient(
-                        colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.6)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-            .disabled(isLaunching)
-
-            Spacer()
-        }
-        .padding(16)
-        .background(Color.black.opacity(0.2))
-    }
-
-    private func launchInTerminal() {
-        isLaunching = true
-        TerminalLauncher.shared.launchClaude(for: session, appState: appState)
-
-        // Reset launching state after a delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            isLaunching = false
-            loadSessionContent()
-        }
     }
 
     private func loadSessionContent() {
