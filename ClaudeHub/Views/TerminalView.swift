@@ -739,55 +739,78 @@ class TerminalController: ObservableObject {
     }
 }
 
-// Container that manually sizes the terminal (like SwiftTerm's sample app)
-class TerminalHostView: NSView {
-    weak var terminalView: LocalProcessTerminalView?
+// MARK: - AppKit Terminal View Controller
+// Using NSViewController gives AppKit full control over coordinate systems
 
-    override func layout() {
-        super.layout()
-        // Set terminal frame directly - this is how SwiftTerm's sample app does it
-        terminalView?.frame = bounds
-        terminalView?.needsLayout = true
+class TerminalViewController: NSViewController {
+    weak var controller: TerminalController?
+    private let logger = Logger(subsystem: "com.buzzbox.claudehub", category: "TerminalVC")
+
+    override func loadView() {
+        // Create the view - this is required when not using a nib
+        self.view = NSView()
+        self.view.wantsLayer = true
     }
-}
 
-// SwiftUI wrapper for LocalProcessTerminalView
-struct SwiftTermView: NSViewRepresentable {
-    @ObservedObject var controller: TerminalController
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupTerminal()
+    }
 
-    func makeNSView(context: Context) -> NSView {
-        let container = TerminalHostView()
-        container.wantsLayer = true
-
-        if controller.terminalView == nil {
-            controller.terminalView = LocalProcessTerminalView(frame: .zero)
+    private func setupTerminal() {
+        guard let controller = controller else {
+            logger.error("No controller set")
+            return
         }
 
-        let terminalView = controller.terminalView!
-        container.terminalView = terminalView
+        if controller.terminalView == nil {
+            controller.terminalView = LocalProcessTerminalView(frame: view.bounds)
+        }
+
+        guard let terminalView = controller.terminalView else { return }
 
         // Disable mouse reporting so text selection works
         terminalView.allowMouseReporting = false
 
-        // Add as subview - frame will be set in layout()
-        container.addSubview(terminalView)
+        // Add terminal as subview
+        view.addSubview(terminalView)
 
-        // Auto-focus the terminal
-        DispatchQueue.main.async {
-            terminalView.window?.makeFirstResponder(terminalView)
-        }
-
-        return container
+        logger.info("Terminal view added to controller")
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Ensure terminal fills container on updates
-        if let container = nsView as? TerminalHostView {
-            container.terminalView?.frame = container.bounds
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // Set terminal frame directly - matching SwiftTerm's sample app
+        controller?.terminalView?.frame = view.bounds
+        controller?.terminalView?.needsLayout = true
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // Focus terminal when view appears
+        if let terminal = controller?.terminalView {
+            view.window?.makeFirstResponder(terminal)
         }
-        // Focus terminal
-        if let terminalView = controller.terminalView, let window = nsView.window {
-            window.makeFirstResponder(terminalView)
+    }
+}
+
+// MARK: - SwiftUI Wrapper using NSViewControllerRepresentable
+
+struct SwiftTermView: NSViewControllerRepresentable {
+    @ObservedObject var controller: TerminalController
+
+    func makeNSViewController(context: Context) -> TerminalViewController {
+        let vc = TerminalViewController()
+        vc.controller = controller
+        return vc
+    }
+
+    func updateNSViewController(_ nsViewController: TerminalViewController, context: Context) {
+        // Ensure terminal fills view on updates
+        if let terminal = controller.terminalView {
+            terminal.frame = nsViewController.view.bounds
+            // Focus terminal
+            nsViewController.view.window?.makeFirstResponder(terminal)
         }
     }
 }
