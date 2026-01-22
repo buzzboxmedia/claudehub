@@ -60,7 +60,7 @@ struct WorkspaceView: View {
         isSummarizingBeforeClose = true
 
         // Get terminal content
-        let terminalContent = TerminalLauncher.shared.getSessionContent(for: session)
+        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
 
         // Call Claude API to generate summary
         ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
@@ -119,15 +119,9 @@ struct WorkspaceView: View {
                 // No sessions, create a generic one
                 let newSession = createSession(name: nil, inGroup: nil)
                 windowState.activeSession = newSession
-                // Auto-launch Terminal.app with the new session
-                TerminalLauncher.shared.launchClaude(for: newSession, appState: appState)
             } else if windowState.activeSession == nil {
                 // Select the first session if none active
-                if let firstSession = project.sessions.first {
-                    windowState.activeSession = firstSession
-                    // Auto-launch Terminal.app with the first session
-                    TerminalLauncher.shared.launchClaude(for: firstSession, appState: appState)
-                }
+                windowState.activeSession = project.sessions.first
             }
         }
         .alert("Summarize before leaving?", isPresented: $showUnsavedAlert) {
@@ -915,180 +909,186 @@ struct TaskRow: View {
         return Color.gray.opacity(0.4)
     }
 
-    @ViewBuilder
     var body: some View {
         HStack(spacing: 10) {
             // Status indicator with logged checkmark
-            statusIndicator
-
-            if isEditing {
-                editingTextField
-            } else {
-                sessionInfo
-            }
-        }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 14)
-        .background(isActive ? Color.blue.opacity(0.15) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var statusIndicator: some View {
-        ZStack {
-            if isWorking {
-                Circle()
-                    .fill(Color.blue.opacity(0.3))
-                    .frame(width: 16, height: 16)
-                Circle()
-                    .fill(Color.blue)
-                    .frame(width: 8, height: 8)
-                    .modifier(PulseAnimation())
-            } else if isActive {
-                Circle()
-                    .fill(Color.green.opacity(0.3))
-                    .frame(width: 16, height: 16)
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 8, height: 8)
-            } else if isWaiting {
-                Circle()
-                    .fill(Color.orange.opacity(0.3))
-                    .frame(width: 16, height: 16)
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 8, height: 8)
-            } else if isLogged && !isActive {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.green)
-            } else {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 8, height: 8)
-            }
-        }
-        .frame(width: 16, height: 16)
-    }
-
-    @ViewBuilder
-    private var editingTextField: some View {
-        TextField("Task name", text: $editedName, onCommit: {
-            session.name = editedName
-            isEditing = false
-        })
-        .textFieldStyle(.plain)
-        .font(.system(size: 13))
-    }
-
-    @ViewBuilder
-    private var sessionNameRow: some View {
-        HStack(spacing: 8) {
-            Text(session.name)
-                .font(.system(size: 15))
-                .foregroundStyle(isActive ? .primary : .secondary)
-                .lineLimit(1)
-            statusBadge
-        }
-    }
-
-    @ViewBuilder
-    private var statusBadge: some View {
-        if isWorking {
-            Text("working")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.blue)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(Color.blue.opacity(0.15))
-                .clipShape(Capsule())
-        } else if isWaiting {
-            Text("waiting")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(Color.orange.opacity(0.15))
-                .clipShape(Capsule())
-        } else if isLogged {
-            Text("Logged")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.green)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(Color.green.opacity(0.15))
-                .clipShape(Capsule())
-        }
-    }
-
-    @ViewBuilder
-    private var summaryRow: some View {
-        if let summary = session.lastSessionSummary, !summary.isEmpty {
-            Text(summary)
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .lineLimit(2)
-        }
-    }
-
-    @ViewBuilder
-    private var actionButtons: some View {
-        HStack(spacing: 4) {
-            if isCompleted {
-                Button { showingBillingSheet = true } label: {
-                    Image(systemName: "dollarsign.circle")
+            ZStack {
+                if isWorking {
+                    // Pulsing blue circle when Claude is working
+                    Circle()
+                        .fill(Color.blue.opacity(0.3))
+                        .frame(width: 16, height: 16)
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 8, height: 8)
+                        .modifier(PulseAnimation())
+                } else if isActive {
+                    Circle()
+                        .fill(Color.green.opacity(0.3))
+                        .frame(width: 16, height: 16)
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 8, height: 8)
+                } else if isWaiting {
+                    Circle()
+                        .fill(Color.orange.opacity(0.3))
+                        .frame(width: 16, height: 16)
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 8, height: 8)
+                } else if isLogged && !isActive {
+                    Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(.green)
-                        .frame(width: 24, height: 24)
+                } else {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 8, height: 8)
                 }
-                .buttonStyle(.plain)
+            }
+            .frame(width: 16, height: 16)
+
+            if isEditing {
+                TextField("Task name", text: $editedName, onCommit: {
+                    session.name = editedName
+                    isEditing = false
+                })
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
             } else {
-                Button { completeTask() } label: {
-                    if isCompleting {
-                        ProgressView().scaleEffect(0.6).frame(width: 24, height: 24)
-                    } else {
-                        Image(systemName: "checkmark.circle")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(session.name)
+                            .font(.system(size: 15))
+                            .foregroundStyle(isActive ? .primary : .secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        // Show "working" badge when Claude is actively outputting
+                        if isWorking {
+                            Text("working")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.blue)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+
+                        // Show "waiting" badge when Claude needs input
+                        if isWaiting && !isWorking {
+                            Text("waiting")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+
+                        // Show "Logged" badge for tasks with summaries
+                        if isLogged && !isWaiting && !isWorking {
+                            Text("Logged")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.green)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.green.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                    }
+
+                    // Show summary preview if logged
+                    if let summary = session.lastSessionSummary, !summary.isEmpty {
+                        Text(summary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+
+                    // Show "Project" badge for linked sessions
+                    if session.isProjectLinked {
+                        Text("Project")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Action buttons - simplified: just primary action + delete
+            HStack(spacing: 4) {
+                if isCompleted {
+                    // Billing button for completed tasks
+                    Button {
+                        showingBillingSheet = true
+                    } label: {
+                        Image(systemName: "dollarsign.circle")
                             .font(.system(size: 14))
                             .foregroundStyle(.green)
                             .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .help("Send to billing")
+                } else {
+                    // Complete button for active tasks
+                    Button {
+                        completeTask()
+                    } label: {
+                        if isCompleting {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 24, height: 24)
+                        } else {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.green)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Complete this task")
+                }
+
+                // Delete button - moves task to completed folder so it won't reimport
+                Button {
+                    if windowState.activeSession?.id == session.id {
+                        windowState.activeSession = nil
+                    }
+                    appState.removeController(for: session)
+
+                    // Move task folder to completed/ so it won't be reimported
+                    if let taskFolderPath = session.taskFolderPath {
+                        do {
+                            _ = try TaskFolderService.shared.moveToCompleted(
+                                taskFolderPath: taskFolderPath,
+                                projectPath: session.projectPath
+                            )
+                        } catch {
+                            print("Failed to move task to completed: \(error)")
+                        }
+                    }
+
+                    modelContext.delete(session)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help("Archive this task")
             }
-            Button { deleteSession() } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-        }
-        .opacity(isHovered && !isEditing ? 1 : 0)
-    }
-
-    private func deleteSession() {
-        if windowState.activeSession?.id == session.id {
-            windowState.activeSession = nil
-        }
-        if let taskFolderPath = session.taskFolderPath {
-            try? TaskFolderService.shared.moveToCompleted(
-                taskFolderPath: taskFolderPath,
-                projectPath: session.projectPath
-            )
-        }
-        modelContext.delete(session)
-    }
-
-    @ViewBuilder
-    private var sessionInfo: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                sessionNameRow
-                summaryRow
-            }
-            Spacer()
-            actionButtons
+            .opacity(isHovered && !isEditing ? 1 : 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, indented ? 8 : 10)
@@ -1111,9 +1111,8 @@ struct TaskRow: View {
         }
         .onTapGesture(count: 1) {
             windowState.activeSession = session
+            // Clear waiting state when user views this session
             appState.clearSessionWaiting(session)
-            // Launch Terminal.app with this session
-            TerminalLauncher.shared.launchClaude(for: session, appState: appState)
         }
         .onHover { hovering in
             isHovered = hovering
@@ -1165,7 +1164,11 @@ struct TaskRow: View {
             Divider()
 
             Button(role: .destructive) {
-                deleteSession()
+                if windowState.activeSession?.id == session.id {
+                    windowState.activeSession = nil
+                }
+                appState.removeController(for: session)
+                modelContext.delete(session)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
@@ -1179,28 +1182,39 @@ struct TaskRow: View {
         }
     }
 
-    /// Resume a task by opening in Terminal.app
+    /// Resume a task by loading context and sending update prompt to Claude
     private func resumeTask() {
         isResuming = true
 
-        // Select this session and launch in Terminal.app
+        // First, select this session
         windowState.activeSession = session
         appState.clearSessionWaiting(session)
 
-        // Launch in Terminal.app with resume
-        TerminalLauncher.shared.launchClaude(for: session, appState: appState)
+        // Wait for terminal to be ready, then send the resume prompt
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            // Generate the resume prompt
+            let prompt = appState.generateResumePrompt(for: session)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // Get the terminal controller and send the prompt
+            if let controller = appState.terminalControllers[session.id] {
+                controller.sendToTerminal(prompt + "\n")
+            }
+
             isResuming = false
         }
     }
 
-    /// Complete a task - read session content and mark as done
+    /// Complete a task - save log and mark as done
     private func completeTask() {
         isCompleting = true
 
-        // Get content from Claude's session file
-        let content = TerminalLauncher.shared.getSessionContent(for: session)
+        // Save the log first
+        if let controller = appState.terminalControllers[session.id] {
+            controller.saveLog(for: session)
+        }
+
+        // Generate a summary using Claude API (async)
+        let content = appState.terminalControllers[session.id]?.getTerminalContent() ?? ""
 
         if !content.isEmpty {
             // Generate summary in background
@@ -1214,6 +1228,11 @@ struct TaskRow: View {
 
                         // Also save to task file
                         self.saveToTaskFile(summary: summary, isCompleted: true)
+                    }
+
+                    // Save the log one final time
+                    if let controller = appState.terminalControllers[session.id] {
+                        controller.saveLog(for: session)
                     }
 
                     // Clear active session if this was it
@@ -1433,7 +1452,7 @@ struct TerminalHeader: View {
         isSummarizing = true
 
         // Get terminal content
-        let terminalContent = TerminalLauncher.shared.getSessionContent(for: session)
+        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
 
         // Call Claude API to generate summary
         ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in

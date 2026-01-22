@@ -7,12 +7,12 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        // No external dependencies - using Terminal.app for terminal emulation
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0")
     ],
     targets: [
         .executableTarget(
             name: "ClaudeHub",
-            dependencies: [],
+            dependencies: ["SwiftTerm"],
             path: "ClaudeHub",
             resources: [.copy("Resources/AppIcon.icns")]
         )

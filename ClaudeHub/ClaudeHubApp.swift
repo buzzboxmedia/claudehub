@@ -127,6 +127,9 @@ class AppState: ObservableObject {
     /// Session IDs that have been launched in Terminal.app (not synced)
     var launchedSessions: Set<UUID> = []
 
+    /// Terminal controllers by session ID (for embedded SwiftTerm)
+    var terminalControllers: [UUID: TerminalController] = [:]
+
     /// Per-window states keyed by window ID
     private var windowStates: [UUID: WindowState] = [:]
 
@@ -148,6 +151,21 @@ class AppState: ObservableObject {
 
     func removeWindowState(for windowId: UUID) {
         windowStates.removeValue(forKey: windowId)
+    }
+
+    // MARK: - Terminal Controllers (for embedded SwiftTerm)
+
+    func getOrCreateController(for session: Session) -> TerminalController {
+        if let existing = terminalControllers[session.id] {
+            return existing
+        }
+        let controller = TerminalController()
+        terminalControllers[session.id] = controller
+        return controller
+    }
+
+    func removeController(for session: Session) {
+        terminalControllers.removeValue(forKey: session.id)
     }
 
     // MARK: - Session Launch Tracking
