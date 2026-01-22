@@ -183,14 +183,14 @@ class TailscaleServer {
 
     private func handleStatus(_ connection: NWConnection) {
         let waitingCount = appState?.waitingSessions.count ?? 0
-        let activeCount = appState?.terminalControllers.count ?? 0
+        let launchedCount = appState?.launchedSessions.count ?? 0
 
         sendResponse(connection, status: 200, body: [
             "status": "ok",
             "app": "ClaudeHub",
             "version": AppVersion.version,
             "waiting_sessions": waitingCount,
-            "active_sessions": activeCount,
+            "launched_sessions": launchedCount,
             "tailscale_ip": getTailscaleIP() ?? "unknown"
         ])
     }
@@ -201,21 +201,12 @@ class TailscaleServer {
             return
         }
 
-        // Get sessions from terminal controllers (active ones)
-        var sessions: [[String: Any]] = []
-
-        for (sessionId, controller) in appState.terminalControllers {
-            if let session = controller.currentSession {
-                sessions.append([
-                    "id": sessionId.uuidString,
-                    "name": session.name,
-                    "project_path": session.projectPath,
-                    "is_waiting": appState.waitingSessions.contains(sessionId),
-                    "is_completed": session.isCompleted,
-                    "created_at": ISO8601DateFormatter().string(from: session.createdAt),
-                    "last_accessed": ISO8601DateFormatter().string(from: session.lastAccessedAt)
-                ])
-            }
+        // Return launched session IDs - full session details would need SwiftData access
+        let sessions = appState.launchedSessions.map { id in
+            [
+                "id": id.uuidString,
+                "is_waiting": appState.waitingSessions.contains(id)
+            ] as [String: Any]
         }
 
         sendResponse(connection, status: 200, body: [
@@ -225,73 +216,26 @@ class TailscaleServer {
     }
 
     private func handleGetTerminal(sessionId: String?, connection: NWConnection) {
-        guard let sessionId = sessionId,
-              let uuid = UUID(uuidString: sessionId),
-              let controller = appState?.terminalControllers[uuid] else {
-            sendResponse(connection, status: 404, body: ["error": "Session not found"])
-            return
-        }
-
-        let content = controller.getTerminalContent()
-        let lastLines = content.components(separatedBy: "\n").suffix(100).joined(separator: "\n")
-
-        sendResponse(connection, status: 200, body: [
-            "session_id": sessionId,
-            "content": lastLines,
-            "total_length": content.count
+        // With Terminal.app approach, we can't directly access terminal content
+        // Would need to read from Claude's session files
+        sendResponse(connection, status: 501, body: [
+            "error": "Terminal content not available - using Terminal.app for sessions"
         ])
     }
 
     private func handleReply(sessionId: String?, body: [String: Any]?, connection: NWConnection) {
-        guard let sessionId = sessionId,
-              let uuid = UUID(uuidString: sessionId),
-              let controller = appState?.terminalControllers[uuid] else {
-            sendResponse(connection, status: 404, body: ["error": "Session not found"])
-            return
-        }
-
-        guard let message = body?["message"] as? String else {
-            sendResponse(connection, status: 400, body: ["error": "Missing 'message' in body"])
-            return
-        }
-
-        // Send to terminal
-        DispatchQueue.main.async {
-            controller.sendToTerminal(message + "\n")
-
-            // Clear waiting state
-            if let session = controller.currentSession {
-                self.appState?.clearSessionWaiting(session)
-            }
-        }
-
-        serverLogger.info("Sent reply to session \(sessionId): \(message)")
-
-        sendResponse(connection, status: 200, body: [
-            "success": true,
-            "session_id": sessionId,
-            "message": message
+        // With Terminal.app approach, we can't directly send to terminal
+        // User needs to interact directly with Terminal.app
+        sendResponse(connection, status: 501, body: [
+            "error": "Direct terminal input not available - using Terminal.app for sessions"
         ])
     }
 
     private func handleComplete(sessionId: String?, connection: NWConnection) {
-        guard let sessionId = sessionId,
-              let uuid = UUID(uuidString: sessionId),
-              let controller = appState?.terminalControllers[uuid],
-              let session = controller.currentSession else {
-            sendResponse(connection, status: 404, body: ["error": "Session not found"])
-            return
-        }
-
-        DispatchQueue.main.async {
-            session.isCompleted = true
-            session.completedAt = Date()
-            controller.saveLog(for: session)
-        }
-
-        sendResponse(connection, status: 200, body: [
-            "success": true,
-            "session_id": sessionId
+        // Can still mark sessions complete via this endpoint
+        // Would need SwiftData access to update the session
+        sendResponse(connection, status: 501, body: [
+            "error": "Session completion via API not yet implemented for Terminal.app approach"
         ])
     }
 

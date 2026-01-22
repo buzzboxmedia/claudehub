@@ -124,8 +124,8 @@ class AppState: ObservableObject {
     /// Track which sessions have Claude actively working (outputting text)
     var workingSessions: Set<UUID> = []
 
-    /// Terminal controllers by session ID (not synced - recreated per device)
-    var terminalControllers: [UUID: TerminalController] = [:]
+    /// Session IDs that have been launched in Terminal.app (not synced)
+    var launchedSessions: Set<UUID> = []
 
     /// Per-window states keyed by window ID
     private var windowStates: [UUID: WindowState] = [:]
@@ -150,19 +150,14 @@ class AppState: ObservableObject {
         windowStates.removeValue(forKey: windowId)
     }
 
-    // MARK: - Terminal Controllers
+    // MARK: - Session Launch Tracking
 
-    func getOrCreateController(for session: Session) -> TerminalController {
-        if let existing = terminalControllers[session.id] {
-            return existing
-        }
-        let controller = TerminalController()
-        terminalControllers[session.id] = controller
-        return controller
+    func markSessionLaunched(_ session: Session) {
+        launchedSessions.insert(session.id)
     }
 
-    func removeController(for session: Session) {
-        terminalControllers.removeValue(forKey: session.id)
+    func isSessionLaunched(_ session: Session) -> Bool {
+        launchedSessions.contains(session.id)
     }
 
     // MARK: - Waiting State Management
@@ -211,13 +206,9 @@ class AppState: ObservableObject {
     // MARK: - Log Management
 
     func saveAllActiveLogs() {
-        for (_, controller) in terminalControllers {
-            // TerminalController stores its current session
-            if let session = controller.currentSession {
-                controller.saveLog(for: session)
-            }
-        }
-        appLogger.info("Saved logs for all active sessions")
+        // With Terminal.app approach, logs are managed by Claude CLI directly
+        // Session content is read from ~/.claude/projects/
+        appLogger.info("Session logs are managed by Claude CLI")
     }
 
     // MARK: - Active Projects (ACTIVE-PROJECTS.md parsing)
