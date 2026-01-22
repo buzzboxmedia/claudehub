@@ -822,7 +822,8 @@ class TerminalContainerView: NSView {
     func configureForSelection() {
         // Disable mouse reporting so selection works
         terminalView?.allowMouseReporting = false
-        setupClickMonitor()
+        // Don't set up click/drag monitors - they interfere with SwiftTerm's native selection
+        // setupClickMonitor()
         setupDragDrop()
         setupKeyMonitor()
     }
