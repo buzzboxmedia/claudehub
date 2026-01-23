@@ -217,11 +217,6 @@ class TaskFolderService {
         ## Description
         \(description ?? "No description provided.")
 
-        ## Billing
-        **Estimated:** _
-        **Actual:** _
-        **Billable:** Yes
-
         ## Progress
 
         """
@@ -277,26 +272,10 @@ class TaskFolderService {
                 task.project = line.replacingOccurrences(of: "**Project:**", with: "").trimmingCharacters(in: .whitespaces)
                 continue
             }
-            if line.hasPrefix("**Estimated:**") {
-                task.estimatedHours = line.replacingOccurrences(of: "**Estimated:**", with: "").trimmingCharacters(in: .whitespaces)
-                continue
-            }
-            if line.hasPrefix("**Actual:**") {
-                task.actualHours = line.replacingOccurrences(of: "**Actual:**", with: "").trimmingCharacters(in: .whitespaces)
-                continue
-            }
-            if line.hasPrefix("**Billable:**") {
-                task.billable = line.replacingOccurrences(of: "**Billable:**", with: "").trimmingCharacters(in: .whitespaces).lowercased() == "yes"
-                continue
-            }
 
             // Track sections
             if line.hasPrefix("## Description") {
                 currentSection = "description"
-                continue
-            }
-            if line.hasPrefix("## Billing") {
-                currentSection = "billing"
                 continue
             }
             if line.hasPrefix("## Progress") {
@@ -409,9 +388,7 @@ class TaskFolderService {
     /// Update task status
     func updateTaskStatus(
         at folderPath: URL,
-        status: String,
-        estimatedHours: String? = nil,
-        actualHours: String? = nil
+        status: String
     ) throws {
         let taskFile = folderPath.appendingPathComponent("TASK.md")
 
@@ -427,23 +404,6 @@ class TaskFolderService {
             with: "**Status:** \(status)",
             options: .regularExpression
         )
-
-        // Update hours if provided
-        if let est = estimatedHours {
-            content = content.replacingOccurrences(
-                of: "\\*\\*Estimated:\\*\\* [^\\n]+",
-                with: "**Estimated:** \(est)",
-                options: .regularExpression
-            )
-        }
-
-        if let actual = actualHours {
-            content = content.replacingOccurrences(
-                of: "\\*\\*Actual:\\*\\* [^\\n]+",
-                with: "**Actual:** \(actual)",
-                options: .regularExpression
-            )
-        }
 
         try content.write(to: taskFile, atomically: true, encoding: .utf8)
     }
@@ -620,9 +580,6 @@ struct TaskContent: Identifiable {
     var client: String?
     var project: String?
     var description: String?
-    var estimatedHours: String?
-    var actualHours: String?
-    var billable: Bool = true
     var progressLog: String?
     var progressEntries: [ProgressEntry] = []
 

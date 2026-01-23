@@ -27,14 +27,3 @@ final class ProjectGroup {
         self.sortOrder = sortOrder
     }
 }
-
-// MARK: - Legacy types for migration
-
-struct LegacyProjectGroup: Codable {
-    let id: UUID
-    var name: String
-    let projectPath: String
-    let createdAt: Date
-    var isExpanded: Bool
-    var sortOrder: Int
-}

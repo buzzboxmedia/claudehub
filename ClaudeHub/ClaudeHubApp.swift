@@ -45,15 +45,12 @@ struct ClaudeHubApp: App {
                     NSApplication.shared.activate(ignoringOtherApps: true)
                     // Give AppDelegate access to appState for cleanup on quit
                     appDelegate.appState = appState
-                    // Start Tailscale server for iOS companion app
-                    TailscaleServer.shared.start(appState: appState)
-                }
-                .task {
-                    // Run migration on first launch
-                    let context = sharedModelContainer.mainContext
-                    DataMigration.migrateIfNeeded(modelContext: context)
-                    // Clean up any duplicate projects
-                    DataMigration.deduplicateProjectsIfNeeded(modelContext: context)
+
+                    // Enable session sync
+                    SessionSyncService.shared.isEnabled = true
+
+                    // Import sessions from Dropbox (if sync is enabled)
+                    SessionSyncService.shared.importAllSessions(modelContext: sharedModelContainer.mainContext)
                 }
         }
         .modelContainer(sharedModelContainer)
@@ -110,6 +107,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Save all active session logs before quitting
         appState?.saveAllActiveLogs()
+
+        // Export all sessions to Dropbox (if sync is enabled)
+        // Note: We don't have direct access to modelContainer here, so we'll need to pass it
+        // For now, this will be handled by the sync hooks on session operations
+        appLogger.info("App terminating - session sync handled by operation hooks")
     }
 }
 
@@ -132,10 +134,6 @@ class AppState: ObservableObject {
 
     /// Per-window states keyed by window ID
     private var windowStates: [UUID: WindowState] = [:]
-
-    // Services for active project detection
-    private let activeProjectsParser = ActiveProjectsParser()
-    private let briefingGenerator = ParkerBriefingGenerator()
 
     // MARK: - Window Management
 
@@ -227,16 +225,6 @@ class AppState: ObservableObject {
         // With Terminal.app approach, logs are managed by Claude CLI directly
         // Session content is read from ~/.claude/projects/
         appLogger.info("Session logs are managed by Claude CLI")
-    }
-
-    // MARK: - Active Projects (ACTIVE-PROJECTS.md parsing)
-
-    func parseActiveProjects(at projectPath: String) -> [ActiveProject] {
-        activeProjectsParser.parseActiveProjects(at: projectPath)
-    }
-
-    func generateBriefing(for activeProject: ActiveProject, clientName: String) -> String {
-        briefingGenerator.generateBriefing(for: activeProject, clientName: clientName)
     }
 
     /// Read the saved log content for a session

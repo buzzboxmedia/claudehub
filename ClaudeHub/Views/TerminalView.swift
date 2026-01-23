@@ -574,15 +574,10 @@ class TerminalController: ObservableObject {
         // Use task folder as working directory if available (enables per-task session isolation)
         let workingDir = taskFolderPath ?? directory
 
-        // Build command with optional --resume flag (using specific session ID bypasses picker)
-        var claudeCommand = "cd '\(workingDir)' && claude --dangerously-skip-permissions"
-        if let sessionId = claudeSessionId {
-            claudeCommand += " --resume \(sessionId)"
-            logger.info("Resuming Claude session \(sessionId) in: \(workingDir)")
-        } else {
-            logger.info("Starting fresh Claude session in: \(workingDir)")
-        }
-        claudeCommand += "\n"
+        // Start Claude in the task folder - Claude auto-continues based on folder path
+        // (sessions stored in ~/.claude/projects/{path}/)
+        let claudeCommand = "cd '\(workingDir)' && claude --dangerously-skip-permissions\n"
+        logger.info("Starting Claude in: \(workingDir)")
         terminalView?.send(txt: claudeCommand)
 
         // Ensure terminal has focus after Claude starts
@@ -594,8 +589,8 @@ class TerminalController: ObservableObject {
             }
         }
 
-        // Send task context after Claude is ready (only for fresh sessions without --resume)
-        if claudeSessionId == nil, let taskPath = taskFolderPath {
+        // Send task context after Claude is ready
+        if let taskPath = taskFolderPath {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
                 self?.sendTaskContext(from: taskPath)
             }
@@ -622,7 +617,11 @@ class TerminalController: ObservableObject {
         """
 
         logger.info("Sending task context from \(taskFile.path)")
-        sendToTerminal(prompt + "\n")
+        // Send text first, then carriage return to submit (Enter key = \r in terminals)
+        sendToTerminal(prompt)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.sendToTerminal("\r")
+        }
     }
 
     private func configureTerminal() {
@@ -789,10 +788,8 @@ struct SwiftTermView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        // Focus terminal when view updates
-        if let container = nsView as? TerminalContainerView {
-            container.focusTerminal()
-        }
+        // Don't steal focus on every update - let user interact with other UI elements
+        // Terminal gets focus from: makeNSView, click-to-focus, and startClaudeCommand
     }
 }
 

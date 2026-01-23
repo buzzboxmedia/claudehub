@@ -112,23 +112,15 @@ extension Session {
     }
 }
 
-// MARK: - Drag and Drop Support
+// MARK: - Session Sync Support
 
-extension UTType {
-    static let session = UTType(exportedAs: "com.buzzbox.claudehub.session")
-}
-
-// Note: Transferable conformance needs adjustment for SwiftData @Model classes
-// For now, drag and drop uses session.id instead
-
-// MARK: - Legacy types for migration
-
-struct LegacySession: Codable {
+/// Codable representation of Session for Dropbox sync
+struct SessionMetadata: Codable {
     let id: UUID
     var name: String
-    var description: String?
-    let projectPath: String
-    let createdAt: Date
+    var sessionDescription: String?
+    var projectPath: String
+    var createdAt: Date
     var lastAccessedAt: Date
     var claudeSessionId: String?
     var activeProjectName: String?
@@ -137,34 +129,74 @@ struct LegacySession: Codable {
     var userNamed: Bool
     var logFilePath: String?
     var lastLogSavedAt: Date?
-    var taskGroupId: UUID?
+    var lastProgressSavedAt: Date?
+    var taskFolderPath: String?
     var isCompleted: Bool
     var completedAt: Date?
+    var isWaitingForInput: Bool
 
-    enum CodingKeys: String, CodingKey {
-        case id, name, description, projectPath, createdAt, lastAccessedAt, claudeSessionId
-        case activeProjectName, parkerBriefing, lastSessionSummary, userNamed
-        case logFilePath, lastLogSavedAt, taskGroupId
-        case isCompleted, completedAt
+    // Relationship references (stored as UUIDs, not objects)
+    var projectId: UUID?
+    var taskGroupId: UUID?
+}
+
+extension Session {
+    /// Convert Session to syncable metadata
+    func toMetadata() -> SessionMetadata {
+        return SessionMetadata(
+            id: id,
+            name: name,
+            sessionDescription: sessionDescription,
+            projectPath: projectPath,
+            createdAt: createdAt,
+            lastAccessedAt: lastAccessedAt,
+            claudeSessionId: claudeSessionId,
+            activeProjectName: activeProjectName,
+            parkerBriefing: parkerBriefing,
+            lastSessionSummary: lastSessionSummary,
+            userNamed: userNamed,
+            logFilePath: logFilePath,
+            lastLogSavedAt: lastLogSavedAt,
+            lastProgressSavedAt: lastProgressSavedAt,
+            taskFolderPath: taskFolderPath,
+            isCompleted: isCompleted,
+            completedAt: completedAt,
+            isWaitingForInput: isWaitingForInput,
+            projectId: project?.id,
+            taskGroupId: taskGroup?.id
+        )
     }
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        description = try container.decodeIfPresent(String.self, forKey: .description)
-        projectPath = try container.decode(String.self, forKey: .projectPath)
-        createdAt = try container.decode(Date.self, forKey: .createdAt)
-        lastAccessedAt = try container.decodeIfPresent(Date.self, forKey: .lastAccessedAt) ?? Date()
-        claudeSessionId = try container.decodeIfPresent(String.self, forKey: .claudeSessionId)
-        activeProjectName = try container.decodeIfPresent(String.self, forKey: .activeProjectName)
-        parkerBriefing = try container.decodeIfPresent(String.self, forKey: .parkerBriefing)
-        lastSessionSummary = try container.decodeIfPresent(String.self, forKey: .lastSessionSummary)
-        userNamed = try container.decodeIfPresent(Bool.self, forKey: .userNamed) ?? false
-        logFilePath = try container.decodeIfPresent(String.self, forKey: .logFilePath)
-        lastLogSavedAt = try container.decodeIfPresent(Date.self, forKey: .lastLogSavedAt)
-        taskGroupId = try container.decodeIfPresent(UUID.self, forKey: .taskGroupId)
-        isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
-        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+    /// Update Session from metadata (for merging remote changes)
+    func updateFromMetadata(_ metadata: SessionMetadata) {
+        self.name = metadata.name
+        self.sessionDescription = metadata.sessionDescription
+        self.projectPath = metadata.projectPath
+        self.createdAt = metadata.createdAt
+        self.lastAccessedAt = metadata.lastAccessedAt
+        self.claudeSessionId = metadata.claudeSessionId
+        self.activeProjectName = metadata.activeProjectName
+        self.parkerBriefing = metadata.parkerBriefing
+        self.lastSessionSummary = metadata.lastSessionSummary
+        self.userNamed = metadata.userNamed
+        self.logFilePath = metadata.logFilePath
+        self.lastLogSavedAt = metadata.lastLogSavedAt
+        self.lastProgressSavedAt = metadata.lastProgressSavedAt
+        self.taskFolderPath = metadata.taskFolderPath
+        self.isCompleted = metadata.isCompleted
+        self.completedAt = metadata.completedAt
+        self.isWaitingForInput = metadata.isWaitingForInput
+
+        // Note: Project and TaskGroup relationships are resolved separately
+        // by SessionSyncService during import
     }
 }
+
+// MARK: - Drag and Drop Support
+
+extension UTType {
+    static let session = UTType(exportedAs: "com.buzzbox.claudehub.session")
+}
+
+// Note: Transferable conformance needs adjustment for SwiftData @Model classes
+// For now, drag and drop uses session.id instead

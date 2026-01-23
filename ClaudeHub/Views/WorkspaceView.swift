@@ -35,13 +35,8 @@ struct WorkspaceView: View {
     }
 
     func goBack() {
-        // Check for unsaved progress before going back
-        if let session = windowState.activeSession, hasUnsavedProgress(for: session) {
-            pendingCloseSession = session
-            showUnsavedAlert = true
-        } else {
-            performGoBack()
-        }
+        // Just go back - let Claude sessions keep running in background
+        performGoBack()
     }
 
     private func performGoBack() {
@@ -183,6 +178,9 @@ struct WorkspaceView: View {
         session.taskGroup = group
         modelContext.insert(session)
 
+        // Export to Dropbox (if sync enabled)
+        SessionSyncService.shared.exportSession(session)
+
         return session
     }
 }
@@ -243,6 +241,9 @@ struct SessionSidebar: View {
         session.project = project
         session.taskGroup = selectedGroupForNewTask
         modelContext.insert(session)
+
+        // Export to Dropbox (if sync enabled)
+        SessionSyncService.shared.exportSession(session)
 
         windowState.activeSession = session
         isCreatingTask = false
@@ -873,8 +874,6 @@ struct TaskRow: View {
     @State private var editedName: String = ""
     @State private var isResuming = false
     @State private var isCompleting = false
-    @State private var showingTaskDetail = false
-    @State private var showingBillingSheet = false
 
     var isActive: Bool {
         windowState.activeSession?.id == session.id
@@ -1024,20 +1023,7 @@ struct TaskRow: View {
 
             // Action buttons - simplified: just primary action + delete
             HStack(spacing: 4) {
-                if isCompleted {
-                    // Billing button for completed tasks
-                    Button {
-                        showingBillingSheet = true
-                    } label: {
-                        Image(systemName: "dollarsign.circle")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.green)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Send to billing")
-                } else {
+                if !isCompleted {
                     // Complete button for active tasks
                     Button {
                         completeTask()
@@ -1121,12 +1107,6 @@ struct TaskRow: View {
             NSItemProvider(object: session.id.uuidString as NSString)
         }
         .contextMenu {
-            Button {
-                showingTaskDetail = true
-            } label: {
-                Label("View Details", systemImage: "info.circle")
-            }
-
             if hasLog {
                 Button {
                     NSWorkspace.shared.open(session.actualLogPath)
@@ -1172,13 +1152,6 @@ struct TaskRow: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
-        }
-        .sheet(isPresented: $showingTaskDetail) {
-            TaskDetailView(session: session, project: project, isPresented: $showingTaskDetail)
-                .environmentObject(appState)
-        }
-        .sheet(isPresented: $showingBillingSheet) {
-            SendToBillingSheet(session: session, project: project)
         }
     }
 
@@ -1235,6 +1208,9 @@ struct TaskRow: View {
                         controller.saveLog(for: session)
                     }
 
+                    // Export to Dropbox (if sync enabled)
+                    SessionSyncService.shared.exportSession(session)
+
                     // Clear active session if this was it
                     if windowState.activeSession?.id == session.id {
                         windowState.activeSession = nil
@@ -1247,6 +1223,9 @@ struct TaskRow: View {
             // No content, just complete without summary
             session.isCompleted = true
             session.completedAt = Date()
+
+            // Export to Dropbox (if sync enabled)
+            SessionSyncService.shared.exportSession(session)
 
             // Move task folder to completed directory
             if let taskFolderPath = session.taskFolderPath {

@@ -24,28 +24,6 @@ struct LauncherView: View {
         allProjects.filter { $0.category == .dev }
     }
 
-    /// Open the Buzzbox Task Log spreadsheet (creates if needed)
-    private func openTaskLogSpreadsheet() {
-        let idFile = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claudehub/task_log_sheet_id.txt")
-
-        if let spreadsheetId = try? String(contentsOf: idFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
-           !spreadsheetId.isEmpty {
-            let url = URL(string: "https://docs.google.com/spreadsheets/d/\(spreadsheetId)")!
-            NSWorkspace.shared.open(url)
-        } else {
-            // No spreadsheet yet - initialize it first, then open
-            Task {
-                let result = try? await GoogleSheetsService.shared.initSpreadsheet()
-                if let url = result?.url, let sheetUrl = URL(string: url) {
-                    await MainActor.run {
-                        NSWorkspace.shared.open(sheetUrl)
-                    }
-                }
-            }
-        }
-    }
-
     // Adaptive grid that responds to window width
     private let gridColumns = [
         GridItem(.adaptive(minimum: 120, maximum: 140), spacing: 16)
@@ -69,17 +47,6 @@ struct LauncherView: View {
                     }
                     .overlay(alignment: .trailing) {
                         HStack(spacing: 12) {
-                            // Task Log button in header
-                            Button {
-                                openTaskLogSpreadsheet()
-                            } label: {
-                                Image(systemName: "tablecells")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Open Buzzbox Task Log")
-
                             Button {
                                 showSettings = true
                             } label: {
