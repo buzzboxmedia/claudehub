@@ -1,6 +1,6 @@
 # Sync / Git
 
-**Status:** active
+**Status:** complete
 **Created:** 2026-01-23
 **Project:** ClaudeHub
 
@@ -40,6 +40,9 @@ The cleanup commit removes ~1,843 lines and adds ~393 lines:
 - Identified 1 commit on `cleanup-simplify` ready to merge
 - Documented changes above for cross-machine context
 - Set up Claude session sync via Dropbox symlink
+- Merged `cleanup-simplify` to `main` and pushed
+- Added sync instructions to CLAUDE.md (syncs via Dropbox)
+- **Task complete**
 
 ## Claude Session Sync Setup
 
