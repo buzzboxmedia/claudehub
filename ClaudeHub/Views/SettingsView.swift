@@ -321,6 +321,16 @@ struct ProjectRow: View {
 
             if isHovered {
                 Button {
+                    editProjectPath()
+                } label: {
+                    Image(systemName: "folder.badge.gearshape")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.blue.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .help("Change folder path")
+
+                Button {
                     modelContext.delete(project)
                 } label: {
                     Image(systemName: "minus.circle.fill")
@@ -335,6 +345,21 @@ struct ProjectRow: View {
         .background(isHovered ? Color.white.opacity(0.05) : Color.clear)
         .cornerRadius(6)
         .onHover { isHovered = $0 }
+    }
+
+    func editProjectPath() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select new folder for \(project.name)"
+        panel.directoryURL = URL(fileURLWithPath: project.path)
+
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                project.path = url.path
+            }
+        }
     }
 
     func displayPath(_ path: String) -> String {
