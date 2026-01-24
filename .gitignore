@@ -9,3 +9,6 @@ DerivedData/
 build/
 .build/
 .claudehub-logs/
+
+# CLAUDE.md is a symlink to Dropbox (not tracked in git)
+CLAUDE.md
