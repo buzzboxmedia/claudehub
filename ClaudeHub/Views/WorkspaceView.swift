@@ -1135,6 +1135,10 @@ struct TaskRow: View {
                         }
                     }
 
+                    // Delete the sync file from Dropbox
+                    let syncFile = SessionSyncService.centralSessionsDir.appendingPathComponent("\(session.id.uuidString).json")
+                    try? FileManager.default.removeItem(at: syncFile)
+
                     modelContext.delete(session)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
