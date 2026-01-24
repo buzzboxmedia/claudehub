@@ -930,9 +930,33 @@ struct ProjectGroupSection: View {
         session.taskGroup = group
         modelContext.insert(session)
 
+        // Export to Dropbox (if sync enabled)
+        SessionSyncService.shared.exportSession(session)
+
         windowState.activeSession = session
         isCreatingTask = false
         newTaskName = ""
+
+        // Create task folder with TASK.md (inside the project group folder)
+        let subProjectName = group.name
+
+        Task {
+            do {
+                let taskFolder = try TaskFolderService.shared.createTask(
+                    projectPath: project.path,
+                    projectName: project.name,
+                    subProjectName: subProjectName,
+                    taskName: name,
+                    description: nil
+                )
+                // Link session to task folder
+                await MainActor.run {
+                    session.taskFolderPath = taskFolder.path
+                }
+            } catch {
+                print("Failed to create task folder: \(error)")
+            }
+        }
     }
 }
 
