@@ -312,6 +312,33 @@ struct SessionSidebar: View {
                         if let sessionId = UUID(uuidString: idString),
                            let session = sessions.first(where: { $0.id == sessionId }) {
                             DispatchQueue.main.async {
+                                // Move folder on disk if task has a folder
+                                if let currentPath = session.taskFolderPath {
+                                    Task {
+                                        do {
+                                            try TaskFolderService.shared.moveTask(
+                                                from: URL(fileURLWithPath: currentPath),
+                                                toSubProject: nil,
+                                                projectPath: project.path
+                                            )
+                                            // Update session with new path
+                                            let taskSlug = URL(fileURLWithPath: currentPath).lastPathComponent
+                                                .replacingOccurrences(of: "^\\d{3}-", with: "", options: .regularExpression)
+                                            let newNumber = TaskFolderService.shared.nextTaskNumber(projectPath: project.path, subProjectName: nil) - 1
+                                            let newPath = TaskFolderService.shared.taskFolderPath(
+                                                projectPath: project.path,
+                                                subProjectName: nil,
+                                                taskNumber: newNumber,
+                                                taskName: taskSlug
+                                            )
+                                            await MainActor.run {
+                                                session.taskFolderPath = newPath.path
+                                            }
+                                        } catch {
+                                            print("Failed to move task folder: \(error)")
+                                        }
+                                    }
+                                }
                                 session.taskGroup = nil
                             }
                         }
@@ -777,6 +804,33 @@ struct ProjectGroupSection: View {
                         if let sessionId = UUID(uuidString: idString),
                            let session = project.sessions.first(where: { $0.id == sessionId }) {
                             DispatchQueue.main.async {
+                                // Move folder on disk if task has a folder
+                                if let currentPath = session.taskFolderPath {
+                                    Task {
+                                        do {
+                                            try TaskFolderService.shared.moveTask(
+                                                from: URL(fileURLWithPath: currentPath),
+                                                toSubProject: toGroup?.name,
+                                                projectPath: project.path
+                                            )
+                                            // Update session with new path
+                                            let taskSlug = URL(fileURLWithPath: currentPath).lastPathComponent
+                                                .replacingOccurrences(of: "^\\d{3}-", with: "", options: .regularExpression)
+                                            let newNumber = TaskFolderService.shared.nextTaskNumber(projectPath: project.path, subProjectName: toGroup?.name) - 1
+                                            let newPath = TaskFolderService.shared.taskFolderPath(
+                                                projectPath: project.path,
+                                                subProjectName: toGroup?.name,
+                                                taskNumber: newNumber,
+                                                taskName: taskSlug
+                                            )
+                                            await MainActor.run {
+                                                session.taskFolderPath = newPath.path
+                                            }
+                                        } catch {
+                                            print("Failed to move task folder: \(error)")
+                                        }
+                                    }
+                                }
                                 session.taskGroup = toGroup
                             }
                         }
@@ -811,6 +865,33 @@ struct ProjectGroupSection: View {
                         if let sessionId = UUID(uuidString: idString),
                            let session = project.sessions.first(where: { $0.id == sessionId }) {
                             DispatchQueue.main.async {
+                                // Move folder on disk if task has a folder
+                                if let currentPath = session.taskFolderPath {
+                                    Task {
+                                        do {
+                                            try TaskFolderService.shared.moveTask(
+                                                from: URL(fileURLWithPath: currentPath),
+                                                toSubProject: group.name,
+                                                projectPath: project.path
+                                            )
+                                            // Update session with new path
+                                            let taskSlug = URL(fileURLWithPath: currentPath).lastPathComponent
+                                                .replacingOccurrences(of: "^\\d{3}-", with: "", options: .regularExpression)
+                                            let newNumber = TaskFolderService.shared.nextTaskNumber(projectPath: project.path, subProjectName: group.name) - 1
+                                            let newPath = TaskFolderService.shared.taskFolderPath(
+                                                projectPath: project.path,
+                                                subProjectName: group.name,
+                                                taskNumber: newNumber,
+                                                taskName: taskSlug
+                                            )
+                                            await MainActor.run {
+                                                session.taskFolderPath = newPath.path
+                                            }
+                                        } catch {
+                                            print("Failed to move task folder: \(error)")
+                                        }
+                                    }
+                                }
                                 session.taskGroup = group
                             }
                         }

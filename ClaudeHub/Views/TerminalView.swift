@@ -580,9 +580,14 @@ class TerminalController: ObservableObject {
         logger.info("Starting Claude in: \(workingDir)")
         terminalView?.send(txt: claudeCommand)
 
-        // Ensure terminal has focus after Claude starts
+        // Ensure terminal has focus after Claude starts (only if no text field is active)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             if let terminal = self?.terminalView, let window = terminal.window {
+                // Don't steal focus if user is typing in a text field
+                if let responder = window.firstResponder,
+                   responder is NSTextView || responder is NSTextField {
+                    return
+                }
                 NSApplication.shared.activate(ignoringOtherApps: true)
                 window.makeKeyAndOrderFront(nil)
                 window.makeFirstResponder(terminal)
@@ -1356,9 +1361,15 @@ class TerminalContainerView: NSView {
             window.makeKeyAndOrderFront(nil)
         }
 
-        // Focus terminal when added to window
+        // Focus terminal when added to window (only if no text field is active)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.focusTerminal()
+            guard let self = self, let window = self.window else { return }
+            // Don't steal focus if user is typing in a text field
+            if let responder = window.firstResponder,
+               responder is NSTextView || responder is NSTextField {
+                return
+            }
+            self.focusTerminal()
         }
     }
 
@@ -1370,18 +1381,22 @@ class TerminalContainerView: NSView {
     func focusTerminal() {
         guard let terminal = terminalView, let window = window else { return }
 
+        // Check if another view (like a TextField) currently has focus - don't steal it
+        if let currentResponder = window.firstResponder,
+           currentResponder !== terminal,
+           currentResponder is NSTextView || currentResponder is NSTextField {
+            logger.debug("Not stealing focus from text input")
+            return
+        }
+
         // Make this app active and frontmost
         NSApplication.shared.activate(ignoringOtherApps: true)
 
         // Make window key
         window.makeKeyAndOrderFront(nil)
 
-        // Force terminal to be first responder - try multiple times
-        for delay in [0.0, 0.1, 0.3, 0.5] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                _ = window.makeFirstResponder(terminal)
-            }
-        }
+        // Make terminal first responder (single attempt, no aggressive retries)
+        _ = window.makeFirstResponder(terminal)
     }
 }
 

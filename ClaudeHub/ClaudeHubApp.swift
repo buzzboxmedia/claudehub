@@ -8,6 +8,7 @@ private let appLogger = Logger(subsystem: "com.buzzbox.claudehub", category: "Ap
 class WindowState: ObservableObject {
     @Published var selectedProject: Project?
     @Published var activeSession: Session?
+    @Published var isEditingTextField: Bool = false  // Prevents terminal from stealing focus
 }
 
 @main
