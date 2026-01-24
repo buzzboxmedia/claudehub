@@ -14,10 +14,122 @@ class TaskImportService {
 
     private init() {}
 
+    /// Validate existing sessions and groups against the filesystem
+    /// - Marks sessions as completed if their folder is in completed/
+    /// - Removes sessions whose folders no longer exist
+    /// - Removes groups that are actually task folders (have TASK.md)
+    @MainActor
+    func validateFilesystem(for project: Project, modelContext: ModelContext) {
+        let tasksDir = taskFolderService.tasksDirectory(for: project.path)
+        let completedDir = taskFolderService.completedDirectory(for: project.path)
+
+        var sessionsToDelete: [Session] = []
+        var groupsToDelete: [ProjectGroup] = []
+
+        // Validate sessions with task folder paths
+        for session in project.sessions ?? [] {
+            guard let taskPath = session.taskFolderPath else { continue }
+
+            let taskURL = URL(fileURLWithPath: taskPath)
+
+            // Check if folder exists at original path
+            if fileManager.fileExists(atPath: taskPath) {
+                // Folder exists - check if it's in completed/
+                if taskPath.contains("/completed/") && !session.isCompleted {
+                    logger.info("Marking session as completed (folder in completed/): \(session.name)")
+                    session.isCompleted = true
+                    session.completedAt = Date()
+                }
+                continue
+            }
+
+            // Folder doesn't exist at original path - check if it moved to completed/
+            let folderName = taskURL.lastPathComponent
+            let possibleCompletedPath = completedDir.appendingPathComponent(folderName)
+
+            if fileManager.fileExists(atPath: possibleCompletedPath.path) {
+                // Found in completed folder - update path and mark completed
+                logger.info("Session folder moved to completed: \(session.name)")
+                session.taskFolderPath = possibleCompletedPath.path
+                session.isCompleted = true
+                session.completedAt = session.completedAt ?? Date()
+            } else {
+                // Check for numbered prefix versions (e.g., 001-branding, 002-branding)
+                var found = false
+                if let contents = try? fileManager.contentsOfDirectory(at: completedDir, includingPropertiesForKeys: nil) {
+                    for item in contents {
+                        let itemName = item.lastPathComponent
+                        // Check if the folder name matches after stripping number prefix
+                        let strippedName = itemName.replacingOccurrences(of: "^\\d{3}-", with: "", options: .regularExpression)
+                        if strippedName == folderName || itemName == folderName {
+                            logger.info("Session folder found in completed with different name: \(session.name) -> \(itemName)")
+                            session.taskFolderPath = item.path
+                            session.isCompleted = true
+                            session.completedAt = session.completedAt ?? Date()
+                            found = true
+                            break
+                        }
+                    }
+                }
+
+                if !found {
+                    // Folder truly doesn't exist - mark for deletion
+                    logger.info("Session folder no longer exists, removing: \(session.name)")
+                    sessionsToDelete.append(session)
+                }
+            }
+        }
+
+        // Validate project groups - they should be directories without TASK.md
+        for group in project.taskGroups ?? [] {
+            let groupSlug = taskFolderService.slugify(group.name)
+            let groupPath = tasksDir.appendingPathComponent(groupSlug)
+
+            // Check if directory exists
+            var isDir: ObjCBool = false
+            if !fileManager.fileExists(atPath: groupPath.path, isDirectory: &isDir) || !isDir.boolValue {
+                logger.info("Group folder no longer exists, removing: \(group.name)")
+                groupsToDelete.append(group)
+                continue
+            }
+
+            // Check if it has TASK.md (meaning it's actually a task, not a group)
+            let taskFile = groupPath.appendingPathComponent("TASK.md")
+            if fileManager.fileExists(atPath: taskFile.path) {
+                logger.info("Group is actually a task folder (has TASK.md), removing group: \(group.name)")
+                // Move sessions out of this group before deleting
+                for session in group.sessions {
+                    session.taskGroup = nil
+                }
+                groupsToDelete.append(group)
+            }
+        }
+
+        // Delete stale records
+        for session in sessionsToDelete {
+            modelContext.delete(session)
+        }
+        for group in groupsToDelete {
+            modelContext.delete(group)
+        }
+
+        if !sessionsToDelete.isEmpty || !groupsToDelete.isEmpty {
+            do {
+                try modelContext.save()
+                logger.info("Cleaned up \(sessionsToDelete.count) sessions, \(groupsToDelete.count) groups")
+            } catch {
+                logger.error("Failed to save cleanup: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Import all tasks from a project's tasks directory
     /// Returns the number of tasks imported
     @MainActor
     func importTasks(for project: Project, modelContext: ModelContext) -> Int {
+        // First validate existing records against filesystem
+        validateFilesystem(for: project, modelContext: modelContext)
+
         let tasksDir = taskFolderService.tasksDirectory(for: project.path)
 
         guard fileManager.fileExists(atPath: tasksDir.path) else {
