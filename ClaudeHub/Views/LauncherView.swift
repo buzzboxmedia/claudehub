@@ -138,14 +138,8 @@ struct LauncherView: View {
             modelContext.insert(project)
         }
 
-        // Dev project
-        let devProject = Project(
-            name: "ClaudeHub",
-            path: "\(NSHomeDirectory())/Code/claudehub",
-            icon: "hammer.fill",
-            category: .dev
-        )
-        modelContext.insert(devProject)
+        // ClaudeHub dev work is done in terminal, not in the app
+        // (changes require rebuild/restart anyway)
     }
 }
 
