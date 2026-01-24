@@ -638,11 +638,31 @@ struct ProjectGroupSection: View {
     @FocusState private var isTaskFieldFocused: Bool
 
     var tasks: [Session] {
-        group.sessions.filter { !$0.isCompleted }
+        group.sessions.filter { !$0.isCompleted && !isProjectSession($0) }
+    }
+
+    /// The session representing the project itself (not a sub-task)
+    var projectSession: Session? {
+        group.sessions.first { isProjectSession($0) }
+    }
+
+    /// Check if a session is the project session (its folder is the project folder, not a sub-task)
+    private func isProjectSession(_ session: Session) -> Bool {
+        guard let path = session.taskFolderPath else { return false }
+        let expectedProjectPath = TaskFolderService.shared.projectDirectory(
+            projectPath: project.path,
+            projectName: group.name
+        ).path
+        return path == expectedProjectPath
     }
 
     var isDragging: Bool {
         draggedGroupId == group.id
+    }
+
+    var isProjectActive: Bool {
+        guard let projectSession = projectSession else { return false }
+        return windowState.activeSession?.id == projectSession.id
     }
 
     var body: some View {
@@ -660,24 +680,33 @@ struct ProjectGroupSection: View {
                 }
                 .buttonStyle(.plain)
 
-                // Folder icon
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.purple)
+                // Folder icon + name - clickable to open project
+                Button {
+                    if let session = projectSession {
+                        windowState.activeSession = session
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(isProjectActive ? .blue : .purple)
 
-                // Group name
-                if isEditing {
-                    TextField("Project name", text: $editedName, onCommit: {
-                        group.name = editedName
-                        isEditing = false
-                    })
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15, weight: .medium))
-                } else {
-                    Text(group.name)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.primary)
+                        if isEditing {
+                            TextField("Project name", text: $editedName, onCommit: {
+                                group.name = editedName
+                                isEditing = false
+                            })
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 15, weight: .medium))
+                        } else {
+                            Text(group.name)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(isProjectActive ? .blue : .primary)
+                        }
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(projectSession == nil)
 
                 Spacer()
 
