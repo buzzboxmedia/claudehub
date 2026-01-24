@@ -38,10 +38,6 @@ struct MenuBarView: View {
         allProjects.filter { $0.category == .client }
     }
 
-    var devProjects: [Project] {
-        allProjects.filter { $0.category == .dev }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Active sessions

@@ -20,10 +20,6 @@ struct LauncherView: View {
         allProjects.filter { $0.category == .client }
     }
 
-    var devProjects: [Project] {
-        allProjects.filter { $0.category == .dev }
-    }
-
     // Adaptive grid that responds to window width
     private let gridColumns = [
         GridItem(.adaptive(minimum: 120, maximum: 140), spacing: 16)
@@ -78,14 +74,36 @@ struct LauncherView: View {
                             )
                         }
 
-                        // Development Section
-                        if !devProjects.isEmpty {
-                            ProjectSection(
-                                title: "DEVELOPMENT",
-                                projects: devProjects,
-                                columns: gridColumns,
-                                accentColor: .orange
-                            )
+                        // Development shortcut (opens in Terminal, not ClaudeHub)
+                        VStack(alignment: .leading, spacing: 20) {
+                            Text("DEVELOPMENT")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.orange)
+                                .tracking(1.5)
+
+                            Button {
+                                openTerminalAtPath("\(NSHomeDirectory())/Dropbox/claudehub")
+                            } label: {
+                                VStack(spacing: 14) {
+                                    Image(systemName: "hammer.fill")
+                                        .font(.system(size: 36))
+                                        .foregroundStyle(.primary)
+                                    Text("ClaudeHub")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                }
+                                .frame(width: 120, height: 120)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                        .shadow(color: .black.opacity(0.1), radius: 10)
+                                }
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -103,6 +121,20 @@ struct LauncherView: View {
                 createDefaultProjects()
                 UserDefaults.standard.set(true, forKey: "hasCreatedDefaultProjects")
             }
+        }
+    }
+
+    /// Open Terminal at a specific path
+    private func openTerminalAtPath(_ path: String) {
+        let script = """
+        tell application "Terminal"
+            activate
+            do script "cd '\(path)' && claude"
+        end tell
+        """
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            appleScript.executeAndReturnError(&error)
         }
     }
 
