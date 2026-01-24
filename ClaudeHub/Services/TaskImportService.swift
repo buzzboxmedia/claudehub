@@ -26,8 +26,50 @@ class TaskImportService {
         var sessionsToDelete: [Session] = []
         var groupsToDelete: [ProjectGroup] = []
 
-        // Validate sessions with task folder paths
+        // Build set of active task folder names for reference
+        let activeTaskFolders = findTaskFolders(in: tasksDir)
+        let activeTaskNames = Set(activeTaskFolders.map { taskFolderService.slugify($0.lastPathComponent) })
+
+        // Get completed folder names
+        var completedTaskNames: [String: URL] = [:]
+        if let completedContents = try? fileManager.contentsOfDirectory(at: completedDir, includingPropertiesForKeys: nil) {
+            for item in completedContents {
+                let name = item.lastPathComponent
+                // Store both the full name and stripped name (without number prefix)
+                let strippedName = name.replacingOccurrences(of: "^\\d{3}-", with: "", options: .regularExpression)
+                completedTaskNames[name] = item
+                completedTaskNames[strippedName] = item
+            }
+        }
+
+        // Validate all sessions
         for session in project.sessions ?? [] {
+            // Skip already completed sessions
+            if session.isCompleted { continue }
+
+            // Check sessions WITHOUT taskFolderPath first
+            if session.taskFolderPath == nil {
+                let sessionSlug = taskFolderService.slugify(session.name)
+
+                // Check if this session name matches a completed task
+                if let completedPath = completedTaskNames[sessionSlug] {
+                    logger.info("Session matches completed task (no folder path): \(session.name)")
+                    session.taskFolderPath = completedPath.path
+                    session.isCompleted = true
+                    session.completedAt = Date()
+                    continue
+                }
+
+                // Check if there's NO matching active task folder
+                if !activeTaskNames.contains(sessionSlug) {
+                    // Session has no folder path and no matching task folder - orphaned
+                    logger.info("Orphaned session (no matching task folder): \(session.name)")
+                    sessionsToDelete.append(session)
+                }
+                continue
+            }
+
+            // Sessions WITH taskFolderPath
             guard let taskPath = session.taskFolderPath else { continue }
 
             let taskURL = URL(fileURLWithPath: taskPath)
