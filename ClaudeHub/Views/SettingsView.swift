@@ -6,8 +6,6 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
-    @State private var apiKey: String = UserDefaults.standard.string(forKey: "anthropic_api_key") ?? ""
-    @State private var isAPIKeyVisible = false
 
     // Fetch projects
     @Query(sort: \Project.name) private var allProjects: [Project]
@@ -89,71 +87,6 @@ struct SettingsView: View {
                 ForEach(clientProjects) { project in
                     ProjectRow(project: project)
                 }
-            }
-
-            Divider()
-                .padding(.vertical, 8)
-
-            // API Key Section
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("API KEY")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if !apiKey.isEmpty {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.green)
-                    }
-                }
-                .padding(.horizontal, 16)
-
-                HStack(spacing: 8) {
-                    if isAPIKeyVisible {
-                        TextField("sk-ant-...", text: $apiKey)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(8)
-                            .background(Color.black.opacity(0.2))
-                            .cornerRadius(6)
-                    } else {
-                        SecureField("sk-ant-...", text: $apiKey)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(8)
-                            .background(Color.black.opacity(0.2))
-                            .cornerRadius(6)
-                    }
-
-                    Button {
-                        isAPIKeyVisible.toggle()
-                    } label: {
-                        Image(systemName: isAPIKeyVisible ? "eye.slash" : "eye")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        UserDefaults.standard.set(apiKey, forKey: "anthropic_api_key")
-                    } label: {
-                        Text("Save")
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.blue)
-                            .foregroundStyle(.white)
-                            .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 16)
-
-                Text("Used for auto-generating chat titles")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 16)
             }
 
             Divider()
@@ -264,7 +197,7 @@ struct SettingsView: View {
             }
             .padding(12)
         }
-        .frame(width: 350, height: 580)
+        .frame(width: 350, height: 480)
         .background(.ultraThinMaterial)
     }
 
