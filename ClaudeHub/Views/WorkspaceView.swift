@@ -88,12 +88,47 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Auto-save terminal log on session switch (saves to .log file and updates session)
-    private func autoSaveLog(session: Session) {
-        // Save to .log file
+    /// Auto-save and summarize session on switch (for context when returning later)
+    private func autoSaveAndSummarize(session: Session) {
+        // First, save the raw log
         if let controller = appState.terminalControllers[session.id] {
             controller.saveLog(for: session)
-            print("Auto-saved log for: \(session.name)")
+        }
+
+        // Then generate AI summary for context
+        guard let taskFolderPath = session.taskFolderPath else { return }
+
+        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+
+        // Need some content to summarize
+        guard terminalContent.count > 100 else { return }
+
+        // Generate summary in background
+        ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
+            guard let summary = summary else { return }
+
+            // Save to TASK.md Progress section
+            let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
+
+            do {
+                var content = try String(contentsOf: taskFile, encoding: .utf8)
+
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+                let timestamp = dateFormatter.string(from: Date())
+
+                content += "\n### \(timestamp)\n\(summary)\n"
+                try content.write(to: taskFile, atomically: true, encoding: .utf8)
+
+                DispatchQueue.main.async {
+                    session.lastProgressSavedAt = Date()
+                    session.lastSessionSummary = summary
+                }
+
+                print("Auto-summarized: \(session.name)")
+            } catch {
+                print("Auto-summarize failed: \(error)")
+            }
         }
     }
 
@@ -142,10 +177,10 @@ struct WorkspaceView: View {
             FileWatcherService.shared.stopWatching()
         }
         .onChange(of: windowState.activeSession?.id) { oldValue, newValue in
-            // Auto-save log for the previous session when switching
+            // Auto-save and summarize the previous session when switching
             if let oldId = oldValue, oldId != newValue {
                 if let previousSession = project.sessions.first(where: { $0.id == oldId }) {
-                    autoSaveLog(session: previousSession)
+                    autoSaveAndSummarize(session: previousSession)
                 }
             }
             previousSessionId = newValue
