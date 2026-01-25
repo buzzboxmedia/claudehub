@@ -12,6 +12,7 @@ struct WorkspaceView: View {
     @State private var showUnsavedAlert = false
     @State private var pendingCloseSession: Session?
     @State private var isSummarizingBeforeClose = false
+    @State private var previousSessionId: UUID?  // For auto-summarize on switch
 
     // Use the project's sessions relationship instead of a separate query
     var sessions: [Session] {
@@ -87,6 +88,49 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Auto-summarize a session silently in the background (called on session switch)
+    private func autoSummarize(session: Session) {
+        guard let taskFolderPath = session.taskFolderPath else { return }
+
+        // Get terminal content
+        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+
+        // Only summarize if there's meaningful content (more than just prompts)
+        guard terminalContent.count > 200 else { return }
+
+        // Check if we already summarized recently (within last 5 minutes)
+        if let lastSaved = session.lastProgressSavedAt,
+           Date().timeIntervalSince(lastSaved) < 300 {
+            return
+        }
+
+        // Call Claude API to generate summary silently
+        ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
+            guard let summary = summary else { return }
+
+            // Save to TASK.md
+            let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
+
+            do {
+                var content = try String(contentsOf: taskFile, encoding: .utf8)
+
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+                let timestamp = dateFormatter.string(from: Date())
+
+                content += "\n### \(timestamp)\n\(summary)\n"
+                try content.write(to: taskFile, atomically: true, encoding: .utf8)
+
+                DispatchQueue.main.async {
+                    session.lastProgressSavedAt = Date()
+                    session.lastSessionSummary = summary
+                }
+            } catch {
+                print("Auto-summarize failed: \(error)")
+            }
+        }
+    }
+
     var body: some View {
         HSplitView {
             // Sidebar
@@ -130,6 +174,16 @@ struct WorkspaceView: View {
         }
         .onDisappear {
             FileWatcherService.shared.stopWatching()
+        }
+        .onChange(of: windowState.activeSession?.id) { oldValue, newValue in
+            // Auto-summarize the previous session when switching
+            if let oldId = oldValue, oldId != newValue {
+                if let previousSession = project.sessions.first(where: { $0.id == oldId }) {
+                    autoSummarize(session: previousSession)
+                }
+            }
+            // Track for next switch
+            previousSessionId = newValue
         }
         .alert("Summarize before leaving?", isPresented: $showUnsavedAlert) {
             Button("Don't Save") {
