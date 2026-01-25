@@ -21,9 +21,6 @@ struct SettingsView: View {
     // Notification settings (bound to NotificationManager)
     @ObservedObject private var notificationManager = NotificationManager.shared
 
-    // API Key
-    @State private var apiKey: String = UserDefaults.standard.string(forKey: "anthropic_api_key") ?? ""
-
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -148,31 +145,6 @@ struct SettingsView: View {
                 }
             }
 
-            Divider()
-                .padding(.vertical, 8)
-
-            // API Key Section
-            VStack(alignment: .leading, spacing: 8) {
-                Text("API KEY")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    SecureField("Anthropic API Key", text: $apiKey)
-                        .font(.system(size: 12))
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: apiKey) { _, newValue in
-                            UserDefaults.standard.set(newValue, forKey: "anthropic_api_key")
-                        }
-
-                    Text("Used for AI summaries when closing tasks")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 16)
-            }
-
             Spacer()
 
             Divider()
@@ -225,7 +197,7 @@ struct SettingsView: View {
             }
             .padding(12)
         }
-        .frame(width: 350, height: 560)
+        .frame(width: 350, height: 480)
         .background(.ultraThinMaterial)
     }
 

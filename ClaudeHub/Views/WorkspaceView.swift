@@ -53,95 +53,32 @@ struct WorkspaceView: View {
     }
 
     private func summarizeAndClose(session: Session) {
-        guard let taskFolderPath = session.taskFolderPath else {
+        guard session.taskFolderPath != nil else {
             performGoBack()
             return
         }
 
         isSummarizingBeforeClose = true
 
-        // Get terminal content
-        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+        // Get terminal controller and ask Claude to summarize
+        let controller = appState.getOrCreateController(for: session)
 
-        // Call Claude API to generate summary
-        ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
-            defer {
-                isSummarizingBeforeClose = false
-                performGoBack()
-            }
+        // Send prompt to Claude asking it to update TASK.md
+        let prompt = "Please add a brief 1-2 sentence summary of what we accomplished to the Progress section of TASK.md (append with today's date as ### heading). Just update the file, no need to show me the contents.\n"
+        controller.sendToTerminal(prompt)
 
-            guard let summary = summary else { return }
-
-            // Save to TASK.md
-            let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
-
-            do {
-                var content = try String(contentsOf: taskFile, encoding: .utf8)
-
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
-                let timestamp = dateFormatter.string(from: Date())
-
-                content += "\n### \(timestamp)\n\(summary)\n"
-                try content.write(to: taskFile, atomically: true, encoding: .utf8)
-
-                session.lastProgressSavedAt = Date()
-                session.lastSessionSummary = summary
-            } catch {
-                print("Failed to save summary: \(error)")
-            }
+        // Wait for Claude to process, then close
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            self.isSummarizingBeforeClose = false
+            self.performGoBack()
         }
     }
 
-    /// Auto-save and summarize session (for context when returning later)
-    /// Uses content hash to skip if nothing changed
+    /// Auto-save session log (runs in background, doesn't interrupt user)
     private func autoSaveAndSummarize(session: Session, force: Bool = false) {
-        // First, save the raw log
+        // Save the raw log only - summaries are generated on explicit "Summarize & Close"
         if let controller = appState.terminalControllers[session.id] {
             controller.saveLog(for: session)
-        }
-
-        // Then generate AI summary for context
-        guard let taskFolderPath = session.taskFolderPath else { return }
-
-        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
-
-        // Need some content to summarize
-        guard terminalContent.count > 100 else { return }
-
-        // Check if content changed since last summarize (skip if same)
-        let contentHash = terminalContent.hashValue
-        if !force, let lastHash = lastSummarizedContentHash[session.id], lastHash == contentHash {
-            return  // Content unchanged, skip
-        }
-
-        // Update hash
-        lastSummarizedContentHash[session.id] = contentHash
-
-        // Generate summary in background
-        ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
-            guard let summary = summary else { return }
-
-            // Save to TASK.md Progress section
-            let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
-
-            do {
-                var content = try String(contentsOf: taskFile, encoding: .utf8)
-
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
-                let timestamp = dateFormatter.string(from: Date())
-
-                content += "\n### \(timestamp)\n\(summary)\n"
-                try content.write(to: taskFile, atomically: true, encoding: .utf8)
-
-                DispatchQueue.main.async {
-                    session.lastProgressSavedAt = Date()
-                    session.lastSessionSummary = summary
-                }
-            } catch {
-                print("Auto-summarize failed: \(error)")
-            }
         }
     }
 
@@ -1470,46 +1407,24 @@ struct TaskRow: View {
             controller.saveLog(for: session)
         }
 
-        // Generate a summary using Claude API (async)
-        let content = appState.terminalControllers[session.id]?.getTerminalContent() ?? ""
+        // Ask Claude to update TASK.md with completion summary (if task folder exists)
+        if session.taskFolderPath != nil {
+            let controller = appState.getOrCreateController(for: session)
+            let prompt = "Please add a brief completion summary to the Progress section of TASK.md (append with today's date as ### heading, and note that the task is now complete). Just update the file, no need to show me the contents.\n"
+            controller.sendToTerminal(prompt)
+        }
 
-        if !content.isEmpty {
-            // Generate summary in background
-            ClaudeAPI.shared.generateTaskSummary(from: content, taskName: session.name) { summary in
-                DispatchQueue.main.async {
-                    // Mark as completed with summary
-                    session.isCompleted = true
-                    session.completedAt = Date()
-                    if let summary = summary {
-                        session.lastSessionSummary = summary
-
-                        // Also save to task file
-                        self.saveToTaskFile(summary: summary, isCompleted: true)
-                    }
-
-                    // Save the log one final time
-                    if let controller = appState.terminalControllers[session.id] {
-                        controller.saveLog(for: session)
-                    }
-
-                    // Export to Dropbox (if sync enabled)
-                    SessionSyncService.shared.exportSession(session)
-
-                    // Clear active session if this was it
-                    if windowState.activeSession?.id == session.id {
-                        windowState.activeSession = nil
-                    }
-
-                    isCompleting = false
-                }
-            }
-        } else {
-            // No content, just complete without summary
+        // Wait for Claude to process, then mark complete
+        let delay = session.taskFolderPath != nil ? 3.0 : 0.1
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            // Mark as completed
             session.isCompleted = true
             session.completedAt = Date()
 
-            // Export to Dropbox (if sync enabled)
-            SessionSyncService.shared.exportSession(session)
+            // Save the log one final time
+            if let controller = appState.terminalControllers[session.id] {
+                controller.saveLog(for: session)
+            }
 
             // Move task folder to completed directory
             if let taskFolderPath = session.taskFolderPath {
@@ -1529,6 +1444,10 @@ struct TaskRow: View {
                 }
             }
 
+            // Export to Dropbox (if sync enabled)
+            SessionSyncService.shared.exportSession(session)
+
+            // Clear active session if this was it
             if windowState.activeSession?.id == session.id {
                 windowState.activeSession = nil
             }
@@ -1710,47 +1629,26 @@ struct TerminalHeader: View {
     }
 
     private func summarizeAndSave() {
-        guard let taskFolderPath = session.taskFolderPath else { return }
+        guard session.taskFolderPath != nil else { return }
 
         isSummarizing = true
 
-        // Get terminal content
-        let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+        // Get terminal controller and ask Claude to summarize
+        let controller = appState.getOrCreateController(for: session)
 
-        // Call Claude API to generate summary
-        ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
-            guard let summary = summary else {
-                isSummarizing = false
-                return
-            }
+        // Send prompt to Claude asking it to update TASK.md
+        let prompt = "Please add a brief 1-2 sentence summary of what we accomplished to the Progress section of TASK.md (append with today's date as ### heading). Just update the file, no need to show me the contents.\n"
+        controller.sendToTerminal(prompt)
 
-            // Save to TASK.md
-            let taskFile = URL(fileURLWithPath: taskFolderPath).appendingPathComponent("TASK.md")
+        // Wait for Claude to process
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            session.lastProgressSavedAt = Date()
+            isSummarizing = false
+            showSavedConfirmation = true
 
-            do {
-                var content = try String(contentsOf: taskFile, encoding: .utf8)
-
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
-                let timestamp = dateFormatter.string(from: Date())
-
-                content += "\n### \(timestamp)\n\(summary)\n"
-                try content.write(to: taskFile, atomically: true, encoding: .utf8)
-
-                // Update session
-                session.lastProgressSavedAt = Date()
-                session.lastSessionSummary = summary
-
-                isSummarizing = false
-                showSavedConfirmation = true
-
-                // Reset confirmation after 2 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    showSavedConfirmation = false
-                }
-            } catch {
-                print("Failed to save summary: \(error)")
-                isSummarizing = false
+            // Reset confirmation after 2 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                showSavedConfirmation = false
             }
         }
     }
