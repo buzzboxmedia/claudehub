@@ -90,19 +90,31 @@ struct WorkspaceView: View {
 
     /// Auto-summarize a session silently in the background (called on session switch)
     private func autoSummarize(session: Session) {
-        guard let taskFolderPath = session.taskFolderPath else { return }
+        print("Auto-summarize triggered for: \(session.name)")
+
+        guard let taskFolderPath = session.taskFolderPath else {
+            print("  - Skipped: no taskFolderPath")
+            return
+        }
 
         // Get terminal content
         let terminalContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+        print("  - Terminal content length: \(terminalContent.count)")
 
         // Only summarize if there's meaningful content (more than just prompts)
-        guard terminalContent.count > 200 else { return }
+        guard terminalContent.count > 200 else {
+            print("  - Skipped: content too short")
+            return
+        }
 
         // Check if we already summarized recently (within last 5 minutes)
         if let lastSaved = session.lastProgressSavedAt,
            Date().timeIntervalSince(lastSaved) < 300 {
+            print("  - Skipped: summarized recently")
             return
         }
+
+        print("  - Calling Claude API...")
 
         // Call Claude API to generate summary silently
         ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
@@ -176,10 +188,14 @@ struct WorkspaceView: View {
             FileWatcherService.shared.stopWatching()
         }
         .onChange(of: windowState.activeSession?.id) { oldValue, newValue in
+            print("Session changed: \(oldValue?.uuidString.prefix(8) ?? "nil") -> \(newValue?.uuidString.prefix(8) ?? "nil")")
             // Auto-summarize the previous session when switching
             if let oldId = oldValue, oldId != newValue {
                 if let previousSession = project.sessions.first(where: { $0.id == oldId }) {
+                    print("Found previous session: \(previousSession.name)")
                     autoSummarize(session: previousSession)
+                } else {
+                    print("Could not find previous session with id: \(oldId)")
                 }
             }
             // Track for next switch
