@@ -172,12 +172,72 @@ class TaskImportService {
         }
     }
 
+    /// Ensure each ProjectGroup has a session so it can be opened in terminal
+    @MainActor
+    func ensureProjectSessions(for project: Project, modelContext: ModelContext) {
+        let tasksDir = taskFolderService.tasksDirectory(for: project.path)
+
+        for group in project.taskGroups {
+            let projectFolderPath = taskFolderService.projectDirectory(
+                projectPath: project.path,
+                projectName: group.name
+            ).path
+
+            // Check if this group already has a project session
+            let hasProjectSession = group.sessions.contains { session in
+                session.taskFolderPath == projectFolderPath
+            }
+
+            if !hasProjectSession {
+                // Check if the project folder exists and has TASK.md - create if not
+                let taskFile = URL(fileURLWithPath: projectFolderPath).appendingPathComponent("TASK.md")
+                if !fileManager.fileExists(atPath: taskFile.path) {
+                    // Create TASK.md and CLAUDE.md for the project
+                    do {
+                        _ = try taskFolderService.createProject(
+                            projectPath: project.path,
+                            projectName: group.name,
+                            clientName: project.name,
+                            description: nil
+                        )
+                    } catch {
+                        logger.error("Failed to create project files: \(error.localizedDescription)")
+                        continue
+                    }
+                }
+
+                // Create a session for this project
+                let session = Session(
+                    name: group.name,
+                    projectPath: project.path,
+                    userNamed: true
+                )
+                session.project = project
+                session.taskGroup = group
+                session.taskFolderPath = projectFolderPath
+                session.sessionDescription = "Project folder for organizing related tasks."
+                modelContext.insert(session)
+
+                logger.info("Created project session for: \(group.name)")
+            }
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save project sessions: \(error.localizedDescription)")
+        }
+    }
+
     /// Import all tasks from a project's tasks directory
     /// Returns the number of tasks imported
     @MainActor
     func importTasks(for project: Project, modelContext: ModelContext) -> Int {
         // First validate existing records against filesystem
         validateFilesystem(for: project, modelContext: modelContext)
+
+        // Ensure all project groups have sessions
+        ensureProjectSessions(for: project, modelContext: modelContext)
 
         let tasksDir = taskFolderService.tasksDirectory(for: project.path)
 
