@@ -1522,6 +1522,7 @@ struct TerminalArea: View {
                             ),
                             lineWidth: 1
                         )
+                        .allowsHitTesting(false)  // Don't intercept mouse events
                 )
                 .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 6)
                 .shadow(color: Color.blue.opacity(0.1), radius: 20, x: 0, y: 0)

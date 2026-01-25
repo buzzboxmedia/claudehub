@@ -27,6 +27,8 @@ struct TerminalView: View {
             if isStarted {
                 SwiftTermView(controller: terminalController)
                     .id(session.id)  // Ensure view updates when session changes
+                    .allowsHitTesting(true)  // Ensure mouse events reach the terminal
+                    .contentShape(Rectangle())  // Define hit area
                     .onAppear {
                         startAutoSave()
                     }
