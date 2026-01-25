@@ -14,11 +14,6 @@ struct WorkspaceView: View {
     @State private var isSummarizingBeforeClose = false
     @State private var previousSessionId: UUID?
 
-    // Auto-summarize timer (every 5 minutes, skips if idle)
-    @State private var autoSummarizeTimer: Timer?
-    @State private var lastSummarizedContentHash: [UUID: Int] = [:]  // Track content changes per session
-    @State private var lastContentLength: [UUID: Int] = [:]  // Track activity by content growth
-
     // Use the project's sessions relationship instead of a separate query
     var sessions: [Session] {
         project.sessions
@@ -74,43 +69,6 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Auto-save session log (runs in background, doesn't interrupt user)
-    private func autoSaveAndSummarize(session: Session, force: Bool = false) {
-        // Save the raw log only - summaries are generated on explicit "Summarize & Close"
-        if let controller = appState.terminalControllers[session.id] {
-            controller.saveLog(for: session)
-        }
-    }
-
-    /// Start the auto-summarize timer (every 5 minutes, skips if idle)
-    private func startAutoSummarizeTimer() {
-        autoSummarizeTimer?.invalidate()
-        autoSummarizeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
-            guard let session = windowState.activeSession else { return }
-
-            // Check if there's been activity (content growth) since last timer fire
-            let currentContent = appState.getOrCreateController(for: session).getFullTerminalContent()
-            let currentLength = currentContent.count
-            let previousLength = lastContentLength[session.id] ?? 0
-
-            // Update tracked length
-            lastContentLength[session.id] = currentLength
-
-            // Skip if no new content (user is idle)
-            if currentLength <= previousLength {
-                return
-            }
-
-            autoSaveAndSummarize(session: session)
-        }
-    }
-
-    /// Stop the auto-summarize timer
-    private func stopAutoSummarizeTimer() {
-        autoSummarizeTimer?.invalidate()
-        autoSummarizeTimer = nil
-    }
-
     var body: some View {
         HSplitView {
             // Sidebar
@@ -156,30 +114,12 @@ struct WorkspaceView: View {
                 }
             }
             FileWatcherService.shared.startWatching(projectPath: project.path)
-
-            // Start auto-summarize timer (every 5 minutes)
-            startAutoSummarizeTimer()
         }
         .onDisappear {
             FileWatcherService.shared.stopWatching()
-            stopAutoSummarizeTimer()
 
             // Remember last active session for next time
             project.lastActiveSessionId = windowState.activeSession?.id
-
-            // Final save for active session when leaving workspace
-            if let session = windowState.activeSession {
-                autoSaveAndSummarize(session: session, force: true)
-            }
-        }
-        .onChange(of: windowState.activeSession?.id) { oldValue, newValue in
-            // Auto-save and summarize the previous session when switching
-            if let oldId = oldValue, oldId != newValue {
-                if let previousSession = project.sessions.first(where: { $0.id == oldId }) {
-                    autoSaveAndSummarize(session: previousSession)
-                }
-            }
-            previousSessionId = newValue
         }
         .alert("Summarize before leaving?", isPresented: $showUnsavedAlert) {
             Button("Don't Save") {
