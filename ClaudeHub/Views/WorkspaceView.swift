@@ -14,10 +14,10 @@ struct WorkspaceView: View {
     @State private var isSummarizingBeforeClose = false
     @State private var previousSessionId: UUID?
 
-    // Auto-summarize timer (every 10 minutes)
+    // Auto-summarize timer (every 5 minutes, skips if idle)
     @State private var autoSummarizeTimer: Timer?
     @State private var lastSummarizedContentHash: [UUID: Int] = [:]  // Track content changes per session
-    @State private var isAutoSummarizing = false
+    @State private var lastContentLength: [UUID: Int] = [:]  // Track activity by content growth
 
     // Use the project's sessions relationship instead of a separate query
     var sessions: [Session] {
@@ -145,11 +145,25 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Start the auto-summarize timer (every 5 minutes)
+    /// Start the auto-summarize timer (every 5 minutes, skips if idle)
     private func startAutoSummarizeTimer() {
         autoSummarizeTimer?.invalidate()
         autoSummarizeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
             guard let session = windowState.activeSession else { return }
+
+            // Check if there's been activity (content growth) since last timer fire
+            let currentContent = appState.getOrCreateController(for: session).getFullTerminalContent()
+            let currentLength = currentContent.count
+            let previousLength = lastContentLength[session.id] ?? 0
+
+            // Update tracked length
+            lastContentLength[session.id] = currentLength
+
+            // Skip if no new content (user is idle)
+            if currentLength <= previousLength {
+                return
+            }
+
             autoSaveAndSummarize(session: session)
         }
     }
