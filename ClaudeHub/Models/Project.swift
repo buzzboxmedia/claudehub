@@ -9,6 +9,9 @@ final class Project {
     var icon: String
     var category: ProjectCategory
 
+    // Remember last active session when returning to project
+    var lastActiveSessionId: UUID?
+
     // Relationships
     @Relationship(deleteRule: .cascade, inverse: \Session.project)
     var sessions: [Session] = []

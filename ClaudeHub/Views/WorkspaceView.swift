@@ -202,8 +202,13 @@ struct WorkspaceView: View {
                 let newSession = createSession(name: nil, inGroup: nil)
                 windowState.activeSession = newSession
             } else if windowState.activeSession == nil {
-                // Select the first session if none active
-                windowState.activeSession = project.sessions.first
+                // Restore last active session, or fall back to first
+                if let lastId = project.lastActiveSessionId,
+                   let lastSession = project.sessions.first(where: { $0.id == lastId }) {
+                    windowState.activeSession = lastSession
+                } else {
+                    windowState.activeSession = project.sessions.first
+                }
             }
 
             // Start real-time file watching for the tasks directory
@@ -221,6 +226,9 @@ struct WorkspaceView: View {
         .onDisappear {
             FileWatcherService.shared.stopWatching()
             stopAutoSummarizeTimer()
+
+            // Remember last active session for next time
+            project.lastActiveSessionId = windowState.activeSession?.id
 
             // Final save for active session when leaving workspace
             if let session = windowState.activeSession {
