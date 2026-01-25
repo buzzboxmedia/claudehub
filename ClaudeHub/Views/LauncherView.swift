@@ -73,42 +73,6 @@ struct LauncherView: View {
                                 columns: gridColumns
                             )
                         }
-
-                        // Development shortcut (opens in Terminal, not ClaudeHub)
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text("DEVELOPMENT")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.orange)
-                                .tracking(1.5)
-
-                            HStack {
-                                Button {
-                                    openTerminalAtPath("\(NSHomeDirectory())/Dropbox/claudehub")
-                                } label: {
-                                    VStack(spacing: 14) {
-                                        Image(systemName: "hammer.fill")
-                                            .font(.system(size: 36))
-                                            .foregroundStyle(.primary)
-                                        Text("ClaudeHub")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundStyle(.primary)
-                                    }
-                                    .frame(width: 120, height: 120)
-                                    .background {
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .fill(.ultraThinMaterial)
-                                            .shadow(color: .black.opacity(0.1), radius: 10)
-                                    }
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .stroke(.white.opacity(0.2), lineWidth: 1)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                Spacer()
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(48)
@@ -146,11 +110,8 @@ struct LauncherView: View {
     private func createDefaultProjects() {
         let dropboxPath = NSString("~/Library/CloudStorage/Dropbox").expandingTildeInPath
         let clientsPath = NSString("~/Library/CloudStorage/Dropbox/Buzzbox/Clients").expandingTildeInPath
-        let codePath = NSString("~/Code").expandingTildeInPath
-
         // Main projects
         let mainDefaults = [
-            ("ClaudeHub", "\(codePath)/claudehub", "hammer.fill"),
             ("Miller", "\(dropboxPath)/Miller", "person.fill"),
             ("Talkspresso", "\(dropboxPath)/Talkspresso", "cup.and.saucer.fill"),
             ("Buzzbox", "\(dropboxPath)/Buzzbox", "shippingbox.fill")
