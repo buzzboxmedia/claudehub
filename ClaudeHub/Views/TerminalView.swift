@@ -576,7 +576,7 @@ class TerminalController: ObservableObject {
 
         // Start Claude in the task folder - Claude auto-continues based on folder path
         // (sessions stored in ~/.claude/projects/{path}/)
-        let claudeCommand = "cd '\(workingDir)' && claude --dangerously-skip-permissions\n"
+        let claudeCommand = "cd '\(workingDir)' && claude --continue --dangerously-skip-permissions\n"
         logger.info("Starting Claude in: \(workingDir)")
         terminalView?.send(txt: claudeCommand)
 
