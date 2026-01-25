@@ -884,12 +884,10 @@ class TerminalContainerView: NSView {
 
     // Pass all mouse events directly to the terminal view for native selection
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // Convert point to terminal view coordinates
-        if let terminal = terminalView {
-            let pointInTerminal = convert(point, to: terminal)
-            if terminal.bounds.contains(pointInTerminal) {
-                return terminal.hitTest(pointInTerminal)
-            }
+        // Always return the terminal view for any click in our bounds
+        // This ensures SwiftTerm handles all mouse events for selection
+        if let terminal = terminalView, bounds.contains(point) {
+            return terminal
         }
         return super.hitTest(point)
     }
