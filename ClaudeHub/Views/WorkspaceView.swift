@@ -12,7 +12,12 @@ struct WorkspaceView: View {
     @State private var showUnsavedAlert = false
     @State private var pendingCloseSession: Session?
     @State private var isSummarizingBeforeClose = false
-    @State private var previousSessionId: UUID?  // For auto-summarize on switch
+    @State private var previousSessionId: UUID?
+
+    // Auto-summarize timer (every 10 minutes)
+    @State private var autoSummarizeTimer: Timer?
+    @State private var lastSummarizedContentHash: [UUID: Int] = [:]  // Track content changes per session
+    @State private var isAutoSummarizing = false
 
     // Use the project's sessions relationship instead of a separate query
     var sessions: [Session] {
@@ -88,8 +93,9 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Auto-save and summarize session on switch (for context when returning later)
-    private func autoSaveAndSummarize(session: Session) {
+    /// Auto-save and summarize session (for context when returning later)
+    /// Uses content hash to skip if nothing changed
+    private func autoSaveAndSummarize(session: Session, force: Bool = false) {
         // First, save the raw log
         if let controller = appState.terminalControllers[session.id] {
             controller.saveLog(for: session)
@@ -102,6 +108,15 @@ struct WorkspaceView: View {
 
         // Need some content to summarize
         guard terminalContent.count > 100 else { return }
+
+        // Check if content changed since last summarize (skip if same)
+        let contentHash = terminalContent.hashValue
+        if !force, let lastHash = lastSummarizedContentHash[session.id], lastHash == contentHash {
+            return  // Content unchanged, skip
+        }
+
+        // Update hash
+        lastSummarizedContentHash[session.id] = contentHash
 
         // Generate summary in background
         ClaudeAPI.shared.generateTaskSummary(from: terminalContent, taskName: session.name) { summary in
@@ -124,12 +139,25 @@ struct WorkspaceView: View {
                     session.lastProgressSavedAt = Date()
                     session.lastSessionSummary = summary
                 }
-
-                print("Auto-summarized: \(session.name)")
             } catch {
                 print("Auto-summarize failed: \(error)")
             }
         }
+    }
+
+    /// Start the auto-summarize timer (every 5 minutes)
+    private func startAutoSummarizeTimer() {
+        autoSummarizeTimer?.invalidate()
+        autoSummarizeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
+            guard let session = windowState.activeSession else { return }
+            autoSaveAndSummarize(session: session)
+        }
+    }
+
+    /// Stop the auto-summarize timer
+    private func stopAutoSummarizeTimer() {
+        autoSummarizeTimer?.invalidate()
+        autoSummarizeTimer = nil
     }
 
     var body: some View {
@@ -172,9 +200,18 @@ struct WorkspaceView: View {
                 }
             }
             FileWatcherService.shared.startWatching(projectPath: project.path)
+
+            // Start auto-summarize timer (every 5 minutes)
+            startAutoSummarizeTimer()
         }
         .onDisappear {
             FileWatcherService.shared.stopWatching()
+            stopAutoSummarizeTimer()
+
+            // Final save for active session when leaving workspace
+            if let session = windowState.activeSession {
+                autoSaveAndSummarize(session: session, force: true)
+            }
         }
         .onChange(of: windowState.activeSession?.id) { oldValue, newValue in
             // Auto-save and summarize the previous session when switching
