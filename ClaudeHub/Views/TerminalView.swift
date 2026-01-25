@@ -882,10 +882,17 @@ class TerminalContainerView: NSView {
         }
     }
 
-    // NOTE: Do NOT override mouseDown/mouseDragged/mouseUp here!
-    // Overriding them and manually forwarding to terminal breaks SwiftTerm's
-    // native selection handling. Let events flow naturally to the terminal view.
-    // The click/drag monitors handle URL detection without blocking selection.
+    // Pass all mouse events directly to the terminal view for native selection
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Convert point to terminal view coordinates
+        if let terminal = terminalView {
+            let pointInTerminal = convert(point, to: terminal)
+            if terminal.bounds.contains(pointInTerminal) {
+                return terminal.hitTest(pointInTerminal)
+            }
+        }
+        return super.hitTest(point)
+    }
 
     // Detect URL at a point in terminal coordinates
     private func detectURLAtPoint(_ point: CGPoint) -> URL? {
