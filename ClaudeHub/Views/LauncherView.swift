@@ -51,6 +51,10 @@ struct LauncherView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .buttonStyle(.plain)
+                            .popover(isPresented: $showSettings, arrowEdge: .bottom) {
+                                SettingsView()
+                                    .environmentObject(appState)
+                            }
                         }
                         .padding(.trailing, 8)
                     }
@@ -77,10 +81,6 @@ struct LauncherView: View {
                 }
                 .padding(48)
             }
-        }
-        .popover(isPresented: $showSettings, arrowEdge: .top) {
-            SettingsView()
-                .environmentObject(appState)
         }
         .onAppear {
             // Create default projects only on first launch (use UserDefaults flag, not query)
