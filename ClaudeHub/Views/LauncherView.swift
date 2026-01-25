@@ -78,7 +78,7 @@ struct LauncherView: View {
                 .padding(48)
             }
         }
-        .sheet(isPresented: $showSettings) {
+        .popover(isPresented: $showSettings, arrowEdge: .top) {
             SettingsView()
                 .environmentObject(appState)
         }
