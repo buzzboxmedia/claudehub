@@ -11,9 +11,9 @@ struct LauncherView: View {
 
     @State private var showSettings = false
 
-    // Filter projects by category
+    // Filter projects by category (exclude Claude Hub since it's shown in DEVELOPMENT)
     var mainProjects: [Project] {
-        allProjects.filter { $0.category == .main }
+        allProjects.filter { $0.category == .main && $0.name != "Claude Hub" }
     }
 
     var clientProjects: [Project] {
