@@ -62,23 +62,8 @@ struct ClaudeHubApp: App {
             CommandGroup(after: .sidebar) {
                 // Escape to go back is handled per-window in WorkspaceView
             }
-            // Ensure standard Edit menu commands work
-            CommandGroup(replacing: .pasteboard) {
-                Button("Copy") {
-                    NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
-                }
-                .keyboardShortcut("c", modifiers: .command)
-
-                Button("Paste") {
-                    NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
-                }
-                .keyboardShortcut("v", modifiers: .command)
-
-                Button("Select All") {
-                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
-                }
-                .keyboardShortcut("a", modifiers: .command)
-            }
+            // Let SwiftTerm handle copy/paste natively via standard responder chain
+            // (Don't override pasteboard commands - they break terminal copy/paste)
 
         }
 
