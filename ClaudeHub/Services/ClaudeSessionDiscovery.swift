@@ -37,6 +37,14 @@ class ClaudeSessionDiscovery {
         return projectPath.replacingOccurrences(of: "/", with: "-")
     }
 
+    /// Resolve symlinks in a path to get the canonical path
+    /// e.g., ~/Dropbox -> ~/Library/CloudStorage/Dropbox
+    func resolveSymlinks(in path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let resolved = url.resolvingSymlinksInPath()
+        return resolved.path
+    }
+
     /// Get the full path to Claude's session folder for a project
     func claudeSessionFolder(for projectPath: String) -> String {
         let folderName = claudeFolderName(for: projectPath)
@@ -44,13 +52,34 @@ class ClaudeSessionDiscovery {
     }
 
     /// Discover all sessions for a given project path
+    /// Tries both the original path and symlink-resolved path
     func discoverSessions(for projectPath: String) -> [DiscoveredSession] {
+        // Try original path first
+        if let sessions = discoverSessionsAtPath(projectPath), !sessions.isEmpty {
+            return sessions
+        }
+
+        // Try with resolved symlinks
+        let resolvedPath = resolveSymlinks(in: projectPath)
+        if resolvedPath != projectPath {
+            logger.info("Trying resolved path: \(resolvedPath)")
+            if let sessions = discoverSessionsAtPath(resolvedPath), !sessions.isEmpty {
+                return sessions
+            }
+        }
+
+        logger.debug("No sessions found for \(projectPath)")
+        return []
+    }
+
+    /// Internal: discover sessions at a specific path
+    private func discoverSessionsAtPath(_ projectPath: String) -> [DiscoveredSession]? {
         let sessionFolder = claudeSessionFolder(for: projectPath)
         let indexPath = "\(sessionFolder)/sessions-index.json"
 
         guard fileManager.fileExists(atPath: indexPath) else {
             logger.debug("No sessions-index.json found at \(indexPath)")
-            return []
+            return nil
         }
 
         do {
