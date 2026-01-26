@@ -577,17 +577,18 @@ class TerminalController: ObservableObject {
         // Use task folder as working directory if available (enables per-task session isolation)
         let workingDir = taskFolderPath ?? directory
 
-        // Check if there's an existing session in this directory
-        let hasExistingSession = checkForExistingSession(in: workingDir)
+        // Only try to continue if:
+        // 1. This is a task with its own folder (taskFolderPath is set), AND
+        // 2. There's an existing session in that folder
+        let shouldContinue = taskFolderPath != nil && checkForExistingSession(in: workingDir)
 
-        // Only use --continue if there's an existing session to continue
         let claudeCommand: String
-        if hasExistingSession {
+        if shouldContinue {
             claudeCommand = "cd '\(workingDir)' && claude --continue --dangerously-skip-permissions\n"
-            logger.info("Starting Claude in: \(workingDir) with --continue (existing session found)")
+            logger.info("Starting Claude in: \(workingDir) with --continue (task has existing session)")
         } else {
             claudeCommand = "cd '\(workingDir)' && claude --dangerously-skip-permissions\n"
-            logger.info("Starting Claude in: \(workingDir) (new session)")
+            logger.info("Starting Claude in: \(workingDir) (new session - no task folder or no existing session)")
         }
         terminalView?.send(txt: claudeCommand)
 
