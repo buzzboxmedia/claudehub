@@ -574,24 +574,10 @@ class TerminalController: ObservableObject {
         // Use task folder as working directory if available (enables per-task session isolation)
         let workingDir = taskFolderPath ?? directory
 
-        // Try to find existing Claude session if we don't have one stored
-        var resumeFlag = ""
-        if claudeSessionId != nil {
-            resumeFlag = " --continue"
-            logger.info("Continuing stored Claude session")
-        } else {
-            // Auto-discover existing Claude sessions for this path
-            if let discoveredSession = ClaudeSessionDiscovery.shared.mostRecentSession(for: workingDir) {
-                resumeFlag = " --resume \(discoveredSession.id)"
-                logger.info("Auto-resuming discovered Claude session: \(discoveredSession.id)")
-            }
-        }
-
-        let claudeCommand = "cd '\(workingDir)' && claude\(resumeFlag) --dangerously-skip-permissions\n"
-        logger.info("Starting Claude in: \(workingDir), resume flag: \(resumeFlag.isEmpty ? "none" : resumeFlag)")
-        // Debug: show what we're doing
-        let debugMsg = resumeFlag.isEmpty ? "# Starting NEW session (no existing sessions found)" : "# Resuming: \(resumeFlag)"
-        terminalView?.send(txt: "echo '\(debugMsg)'\n")
+        // Always use --continue to resume the most recent session in this directory
+        // Claude Code will start a new session if none exists
+        let claudeCommand = "cd '\(workingDir)' && claude --continue --dangerously-skip-permissions\n"
+        logger.info("Starting Claude in: \(workingDir) with --continue")
         terminalView?.send(txt: claudeCommand)
 
         // Ensure terminal has focus after Claude starts (only if no text field is active)
