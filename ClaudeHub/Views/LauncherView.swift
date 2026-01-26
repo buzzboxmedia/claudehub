@@ -11,7 +11,33 @@ struct LauncherView: View {
 
     @State private var showSettings = false
 
-    // Filter projects by category (exclude Claude Hub since it's shown in DEVELOPMENT)
+    // Dropbox path (check both locations)
+    private var dropboxPath: String {
+        let newPath = NSString("~/Library/CloudStorage/Dropbox").expandingTildeInPath
+        let legacyPath = NSString("~/Dropbox").expandingTildeInPath
+        return FileManager.default.fileExists(atPath: newPath) ? newPath : legacyPath
+    }
+
+    // Default projects - always show if folder exists (no database needed)
+    private var defaultMainProjects: [(name: String, path: String, icon: String)] {
+        [
+            ("Miller", "\(dropboxPath)/Miller", "person.fill"),
+            ("Talkspresso", "\(dropboxPath)/Talkspresso", "cup.and.saucer.fill"),
+            ("Buzzbox", "\(dropboxPath)/Buzzbox", "shippingbox.fill")
+        ].filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private var defaultClientProjects: [(name: String, path: String, icon: String)] {
+        let clientsPath = "\(dropboxPath)/Buzzbox/Clients"
+        return [
+            ("AAGL", "\(clientsPath)/AAGL", "cross.case.fill"),
+            ("AFL", "\(clientsPath)/AFL", "building.columns.fill"),
+            ("INFAB", "\(clientsPath)/INFAB", "shield.fill"),
+            ("TDS", "\(clientsPath)/TDS", "eye.fill")
+        ].filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    // Combine database projects with defaults (excluding Claude Hub from main)
     var mainProjects: [Project] {
         allProjects.filter { $0.category == .main && $0.name != "Claude Hub" }
     }
@@ -60,20 +86,20 @@ struct LauncherView: View {
                     }
 
                     VStack(spacing: 36) {
-                        // Main Projects Section
-                        if !mainProjects.isEmpty {
-                            ProjectSection(
+                        // Main Projects Section - show defaults if folders exist
+                        if !defaultMainProjects.isEmpty {
+                            DefaultProjectSection(
                                 title: "PROJECTS",
-                                projects: mainProjects,
+                                defaults: defaultMainProjects,
                                 columns: gridColumns
                             )
                         }
 
-                        // Clients Section
-                        if !clientProjects.isEmpty {
-                            ProjectSection(
+                        // Clients Section - show defaults if folders exist
+                        if !defaultClientProjects.isEmpty {
+                            DefaultProjectSection(
                                 title: "CLIENTS",
-                                projects: clientProjects,
+                                defaults: defaultClientProjects,
                                 columns: gridColumns
                             )
                         }
@@ -95,68 +121,93 @@ struct LauncherView: View {
                 .padding(48)
             }
         }
-        .onAppear {
-            // Create default projects only on first launch (use UserDefaults flag, not query)
-            let hasCreatedDefaults = UserDefaults.standard.bool(forKey: "hasCreatedDefaultProjects")
-            if !hasCreatedDefaults {
-                createDefaultProjects()
-                UserDefaults.standard.set(true, forKey: "hasCreatedDefaultProjects")
+    }
+}
+
+// Section for default projects (based on folder existence, no database needed)
+struct DefaultProjectSection: View {
+    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var windowState: WindowState
+
+    let title: String
+    let defaults: [(name: String, path: String, icon: String)]
+    let columns: [GridItem]
+    var accentColor: Color = .secondary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(accentColor)
+                .tracking(1.5)
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                ForEach(defaults, id: \.name) { item in
+                    DefaultProjectCard(name: item.name, path: item.path, icon: item.icon)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// Card for default projects - creates Project on demand when clicked
+struct DefaultProjectCard: View {
+    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var windowState: WindowState
+
+    let name: String
+    let path: String
+    let icon: String
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            openProject()
+        } label: {
+            VStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 36))
+                    .foregroundStyle(.primary)
+
+                Text(name)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.primary)
+            }
+            .frame(width: 120, height: 120)
+            .background {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(isHovered ? 0.2 : 0.1), radius: isHovered ? 16 : 10)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            }
+            .scaleEffect(isHovered ? 1.05 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isHovered = hovering
             }
         }
     }
 
-    /// Open Terminal at a specific path
-    private func openTerminalAtPath(_ path: String) {
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "cd '\(path)' && claude"
-        end tell
-        """
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
+    private func openProject() {
+        // Create project on demand (not persisted, just for navigation)
+        let category: ProjectCategory = path.contains("/Clients/") ? .client : .main
+        let project = Project(name: name, path: path, icon: icon, category: category)
+
+        withAnimation(.spring(response: 0.3)) {
+            windowState.selectedProject = project
         }
-    }
-
-    /// Create default projects on first launch
-    private func createDefaultProjects() {
-        // Check both possible Dropbox locations
-        let newDropboxPath = NSString("~/Library/CloudStorage/Dropbox").expandingTildeInPath
-        let legacyDropboxPath = NSString("~/Dropbox").expandingTildeInPath
-        let dropboxPath = FileManager.default.fileExists(atPath: newDropboxPath) ? newDropboxPath : legacyDropboxPath
-        let clientsPath = "\(dropboxPath)/Buzzbox/Clients"
-        // Main projects
-        let mainDefaults = [
-            ("Miller", "\(dropboxPath)/Miller", "person.fill"),
-            ("Talkspresso", "\(dropboxPath)/Talkspresso", "cup.and.saucer.fill"),
-            ("Buzzbox", "\(dropboxPath)/Buzzbox", "shippingbox.fill")
-        ]
-
-        for (name, path, icon) in mainDefaults {
-            let project = Project(name: name, path: path, icon: icon, category: .main)
-            modelContext.insert(project)
-        }
-
-        // Client projects
-        let clientDefaults = [
-            ("AAGL", "\(clientsPath)/AAGL", "cross.case.fill"),
-            ("AFL", "\(clientsPath)/AFL", "building.columns.fill"),
-            ("INFAB", "\(clientsPath)/INFAB", "shield.fill"),
-            ("TDS", "\(clientsPath)/TDS", "eye.fill")
-        ]
-
-        for (name, path, icon) in clientDefaults {
-            let project = Project(name: name, path: path, icon: icon, category: .client)
-            modelContext.insert(project)
-        }
-
-        // Explicitly save to ensure persistence
-        try? modelContext.save()
     }
 }
 
-// Reusable section component with grid layout
+// Reusable section component with grid layout (for database-stored projects)
 struct ProjectSection: View {
     let title: String
     let projects: [Project]
