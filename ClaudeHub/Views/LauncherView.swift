@@ -121,8 +121,11 @@ struct LauncherView: View {
 
     /// Create default projects on first launch
     private func createDefaultProjects() {
-        let dropboxPath = NSString("~/Library/CloudStorage/Dropbox").expandingTildeInPath
-        let clientsPath = NSString("~/Library/CloudStorage/Dropbox/Buzzbox/Clients").expandingTildeInPath
+        // Check both possible Dropbox locations
+        let newDropboxPath = NSString("~/Library/CloudStorage/Dropbox").expandingTildeInPath
+        let legacyDropboxPath = NSString("~/Dropbox").expandingTildeInPath
+        let dropboxPath = FileManager.default.fileExists(atPath: newDropboxPath) ? newDropboxPath : legacyDropboxPath
+        let clientsPath = "\(dropboxPath)/Buzzbox/Clients"
         // Main projects
         let mainDefaults = [
             ("Miller", "\(dropboxPath)/Miller", "person.fill"),
