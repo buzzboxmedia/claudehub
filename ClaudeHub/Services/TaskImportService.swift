@@ -172,10 +172,86 @@ class TaskImportService {
         }
     }
 
+    /// Discover and create ProjectGroups from folder structure
+    /// This allows projects created on one machine to appear on another via Dropbox sync
+    @MainActor
+    func discoverProjectGroups(for project: Project, modelContext: ModelContext) {
+        let tasksDir = taskFolderService.tasksDirectory(for: project.path)
+
+        guard fileManager.fileExists(atPath: tasksDir.path) else {
+            return
+        }
+
+        // Get existing group names (slugified for comparison)
+        let existingGroupSlugs = Set(project.taskGroups.map { taskFolderService.slugify($0.name) })
+
+        // Scan for project folders (directories without number prefix that contain task folders or have Type: project)
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: tasksDir,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else {
+            return
+        }
+
+        var maxSortOrder = project.taskGroups.map(\.sortOrder).max() ?? -1
+
+        for item in contents {
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: item.path, isDirectory: &isDir),
+                  isDir.boolValue else {
+                continue
+            }
+
+            let name = item.lastPathComponent
+
+            // Skip archive folders and numbered task folders
+            if name == "completed" || name == "archive" || (name.first?.isNumber ?? false) {
+                continue
+            }
+
+            // Check if this is a project folder (has sub-tasks or has TASK.md with Type: project)
+            let taskFile = item.appendingPathComponent("TASK.md")
+            var isProjectFolder = false
+
+            if fileManager.fileExists(atPath: taskFile.path) {
+                // Check if it's marked as a project
+                if let content = try? String(contentsOf: taskFile, encoding: .utf8) {
+                    isProjectFolder = content.contains("**Type:** project")
+                }
+            } else {
+                // No TASK.md - check if it contains task folders (making it a project)
+                if let subContents = try? fileManager.contentsOfDirectory(at: item, includingPropertiesForKeys: nil) {
+                    isProjectFolder = subContents.contains { sub in
+                        let subTaskFile = sub.appendingPathComponent("TASK.md")
+                        return fileManager.fileExists(atPath: subTaskFile.path)
+                    }
+                }
+            }
+
+            guard isProjectFolder else { continue }
+
+            // Skip if we already have a group for this folder
+            let slug = taskFolderService.slugify(name)
+            guard !existingGroupSlugs.contains(slug) else { continue }
+
+            // Create a new ProjectGroup
+            maxSortOrder += 1
+            let group = ProjectGroup(name: name, projectPath: project.path, sortOrder: maxSortOrder)
+            group.project = project
+            modelContext.insert(group)
+            logger.info("Discovered project group from folder: \(name)")
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save discovered project groups: \(error.localizedDescription)")
+        }
+    }
+
     /// Ensure each ProjectGroup has a session so it can be opened in terminal
     @MainActor
     func ensureProjectSessions(for project: Project, modelContext: ModelContext) {
-        let tasksDir = taskFolderService.tasksDirectory(for: project.path)
 
         for group in project.taskGroups {
             let projectFolderPath = taskFolderService.projectDirectory(
@@ -235,6 +311,9 @@ class TaskImportService {
     func importTasks(for project: Project, modelContext: ModelContext) -> Int {
         // First validate existing records against filesystem
         validateFilesystem(for: project, modelContext: modelContext)
+
+        // Auto-discover project groups from folder structure
+        discoverProjectGroups(for: project, modelContext: modelContext)
 
         // Ensure all project groups have sessions
         ensureProjectSessions(for: project, modelContext: modelContext)
