@@ -95,11 +95,7 @@ struct WorkspaceView: View {
                 print("Auto-imported \(imported) tasks")
             }
 
-            if sessions.isEmpty {
-                // No sessions, create a generic one
-                let newSession = createSession(name: nil, inGroup: nil)
-                windowState.activeSession = newSession
-            } else if windowState.activeSession == nil {
+            if windowState.activeSession == nil && !sessions.isEmpty {
                 // Restore last active session - check both Project property and UserDefaults
                 let lastId = project.lastActiveSessionId ??
                     (UserDefaults.standard.string(forKey: "lastSession:\(project.path)").flatMap { UUID(uuidString: $0) })
