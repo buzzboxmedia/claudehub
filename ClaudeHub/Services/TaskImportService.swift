@@ -26,6 +26,9 @@ class TaskImportService {
         var sessionsToDelete: [Session] = []
         var groupsToDelete: [ProjectGroup] = []
 
+        // Grace period: don't delete recently created items (folder creation is async)
+        let gracePeriod: TimeInterval = 30
+
         // Build set of active task folder names for reference
         let activeTaskFolders = findTaskFolders(in: tasksDir)
         let activeTaskNames = Set(activeTaskFolders.map { taskFolderService.slugify($0.lastPathComponent) })
@@ -62,6 +65,12 @@ class TaskImportService {
 
                 // Check if there's NO matching active task folder
                 if !activeTaskNames.contains(sessionSlug) {
+                    // Grace period: don't delete recently created sessions (folder creation is async)
+                    let sessionAge = Date().timeIntervalSince(session.createdAt)
+                    if sessionAge < gracePeriod {
+                        logger.info("Skipping recently created session (folder may still be creating): \(session.name)")
+                        continue
+                    }
                     // Session has no folder path and no matching task folder - orphaned
                     logger.info("Orphaned session (no matching task folder): \(session.name)")
                     sessionsToDelete.append(session)
@@ -115,6 +124,12 @@ class TaskImportService {
                 }
 
                 if !found {
+                    // Grace period: don't delete recently created sessions (folder creation is async)
+                    let sessionAge = Date().timeIntervalSince(session.createdAt)
+                    if sessionAge < gracePeriod {
+                        logger.info("Skipping recently created session (folder may still be creating): \(session.name)")
+                        continue
+                    }
                     // Folder truly doesn't exist - mark for deletion
                     logger.info("Session folder no longer exists, removing: \(session.name)")
                     sessionsToDelete.append(session)
@@ -123,13 +138,22 @@ class TaskImportService {
         }
 
         // Validate project groups - they should be directories without TASK.md
+        logger.info("DEBUG: Validating \(project.taskGroups.count) groups for project \(project.name)")
         for group in project.taskGroups ?? [] {
             let groupSlug = taskFolderService.slugify(group.name)
             let groupPath = tasksDir.appendingPathComponent(groupSlug)
+            logger.info("DEBUG: Checking group '\(group.name)' -> slug '\(groupSlug)' -> path '\(groupPath.path)'")
+            logger.info("DEBUG: Group has \(group.sessions.count) sessions")
 
             // Check if directory exists
             var isDir: ObjCBool = false
             if !fileManager.fileExists(atPath: groupPath.path, isDirectory: &isDir) || !isDir.boolValue {
+                // Grace period: don't delete recently created groups (folder creation may be async)
+                let groupAge = Date().timeIntervalSince(group.createdAt)
+                if groupAge < gracePeriod {
+                    logger.info("Skipping recently created group (folder may still be creating): \(group.name)")
+                    continue
+                }
                 logger.info("Group folder no longer exists, removing: \(group.name)")
                 groupsToDelete.append(group)
                 continue
@@ -138,10 +162,12 @@ class TaskImportService {
             // Check if it has TASK.md - but projects now have TASK.md too
             // Only remove if it's a task (not a project) based on **Type:** field
             let taskFile = groupPath.appendingPathComponent("TASK.md")
+            logger.info("DEBUG: Checking TASK.md at '\(taskFile.path)' exists=\(self.fileManager.fileExists(atPath: taskFile.path))")
             if fileManager.fileExists(atPath: taskFile.path) {
                 // Read the file and check if it's a project or task
                 if let content = try? String(contentsOf: taskFile, encoding: .utf8) {
                     let isProject = content.contains("**Type:** project")
+                    logger.info("DEBUG: TASK.md content check - isProject=\(isProject)")
                     if !isProject {
                         // It's a task folder, not a project - remove the group
                         logger.info("Group is actually a task folder (has TASK.md without Type: project), removing group: \(group.name)")
@@ -193,7 +219,15 @@ class TaskImportService {
                 group.projectPath == projectPath
             }
         )
-        guard let groups = try? modelContext.fetch(groupDescriptor), !groups.isEmpty else { return }
+        guard let groups = try? modelContext.fetch(groupDescriptor), !groups.isEmpty else {
+            logger.info("DEBUG relink: No groups found for project")
+            return
+        }
+
+        logger.info("DEBUG relink: Found \(sessions.count) sessions and \(groups.count) groups")
+        for g in groups {
+            logger.info("DEBUG relink: Available group '\(g.name)' -> slug '\(self.taskFolderService.slugify(g.name))'")
+        }
 
         var relinkedCount = 0
 
@@ -201,7 +235,11 @@ class TaskImportService {
             guard let taskPath = session.taskFolderPath else { continue }
 
             // Skip if already has a group
-            if session.taskGroup != nil { continue }
+            if session.taskGroup != nil {
+                logger.info("DEBUG relink: Session '\(session.name)' already has group '\(session.taskGroup?.name ?? "nil")'")
+                continue
+            }
+            logger.info("DEBUG relink: Session '\(session.name)' has NO group, taskPath=\(taskPath)")
 
             // Check if the task is inside a sub-project folder
             let taskURL = URL(fileURLWithPath: taskPath)
@@ -436,11 +474,11 @@ class TaskImportService {
         // Clean up any duplicate sessions (same taskFolderPath)
         cleanupDuplicateSessions(for: project, modelContext: modelContext)
 
-        // Re-link sessions that lost their group assignment
-        relinkSessionsToGroups(for: project, modelContext: modelContext)
-
-        // Auto-discover project groups from folder structure
+        // Auto-discover project groups from folder structure (BEFORE re-linking!)
         discoverProjectGroups(for: project, modelContext: modelContext)
+
+        // Re-link sessions that lost their group assignment (AFTER groups are discovered)
+        relinkSessionsToGroups(for: project, modelContext: modelContext)
 
         // Ensure all project groups have sessions
         ensureProjectSessions(for: project, modelContext: modelContext)

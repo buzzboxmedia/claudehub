@@ -325,6 +325,9 @@ struct SessionSidebar: View {
         session.sessionDescription = "Project folder for organizing related tasks."
         modelContext.insert(session)
 
+        // Persist immediately to prevent race conditions with validateFilesystem
+        try? modelContext.save()
+
         // Export to Dropbox (if sync enabled)
         SessionSyncService.shared.exportSession(session)
 
