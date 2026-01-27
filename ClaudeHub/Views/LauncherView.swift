@@ -318,7 +318,7 @@ struct ClaudeHubCard: View {
     @Query(filter: #Predicate<Project> { $0.name == "Claude Hub" }) private var claudeHubProjects: [Project]
     @State private var isHovered = false
 
-    private let claudeHubPath = "\(NSHomeDirectory())/Code/claudehub"
+    private let claudeHubPath = "\(NSHomeDirectory())/Library/CloudStorage/Dropbox/ClaudeHub"
 
     var body: some View {
         Button {
