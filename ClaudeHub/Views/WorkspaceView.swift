@@ -114,14 +114,16 @@ struct WorkspaceView: View {
                 }
             }
 
-            // Start real-time file watching for the tasks directory
-            FileWatcherService.shared.onChangesDetected = { [self] in
-                let imported = TaskImportService.shared.importTasks(for: project, modelContext: modelContext)
-                if imported > 0 {
-                    print("File watcher: imported \(imported) tasks")
+            // Start real-time file watching for the tasks directory (with delay to avoid race with initial import)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                FileWatcherService.shared.onChangesDetected = { [self] in
+                    let imported = TaskImportService.shared.importTasks(for: project, modelContext: modelContext)
+                    if imported > 0 {
+                        print("File watcher: imported \(imported) tasks")
+                    }
                 }
+                FileWatcherService.shared.startWatching(projectPath: project.path)
             }
-            FileWatcherService.shared.startWatching(projectPath: project.path)
         }
         .onDisappear {
             FileWatcherService.shared.stopWatching()
