@@ -16,6 +16,7 @@ struct WorkspaceView: View {
     @State private var pendingCloseSession: Session?
     @State private var isSummarizingBeforeClose = false
     @State private var previousSessionId: UUID?
+    @State private var isSidebarCollapsed = false
 
     // Filter sessions by project path (works for both persisted and non-persisted projects)
     var sessions: [Session] {
@@ -74,12 +75,14 @@ struct WorkspaceView: View {
 
     var body: some View {
         HSplitView {
-            // Sidebar
-            SessionSidebar(project: project, goBack: goBack)
-                .frame(minWidth: 280, idealWidth: 320, maxWidth: 500)
+            // Sidebar (collapsible)
+            if !isSidebarCollapsed {
+                SessionSidebar(project: project, goBack: goBack)
+                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 500)
+            }
 
-            // Terminal area
-            TerminalArea(project: project)
+            // Terminal area with toggle button
+            TerminalArea(project: project, isSidebarCollapsed: $isSidebarCollapsed)
                 .frame(minWidth: 400)
         }
         .background {
@@ -95,24 +98,8 @@ struct WorkspaceView: View {
                 print("Auto-imported \(imported) tasks")
             }
 
-            // Restore last active session for this project
-            // Check if current activeSession belongs to this project, if not, restore from saved
-            let currentSessionBelongsToProject = windowState.activeSession.map { session in
-                sessions.contains { $0.id == session.id }
-            } ?? false
-
-            if !currentSessionBelongsToProject && !sessions.isEmpty {
-                // Restore from UserDefaults (more reliable than project.lastActiveSessionId for non-persisted projects)
-                let lastId = UserDefaults.standard.string(forKey: "lastSession:\(project.path)")
-                    .flatMap { UUID(uuidString: $0) }
-
-                if let lastId = lastId,
-                   let lastSession = sessions.first(where: { $0.id == lastId }) {
-                    windowState.activeSession = lastSession
-                } else {
-                    windowState.activeSession = sessions.first
-                }
-            }
+            // Try to restore last active session (may need to wait for @Query to populate)
+            restoreLastSession()
 
             // Start real-time file watching for the tasks directory (with delay to avoid race with initial import)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -123,6 +110,12 @@ struct WorkspaceView: View {
                     }
                 }
                 FileWatcherService.shared.startWatching(projectPath: project.path)
+            }
+        }
+        .onChange(of: sessions.count) { oldCount, newCount in
+            // When sessions become available (query populated), restore last session if we don't have one
+            if oldCount == 0 && newCount > 0 && windowState.activeSession == nil {
+                restoreLastSession()
             }
         }
         .onDisappear {
@@ -165,6 +158,31 @@ struct WorkspaceView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .ignoresSafeArea()
+            }
+        }
+    }
+
+    // MARK: - Session Restoration
+
+    /// Restore the last active session from UserDefaults
+    private func restoreLastSession() {
+        // Check if current activeSession belongs to this project
+        let currentSessionBelongsToProject = windowState.activeSession.map { session in
+            sessions.contains { $0.id == session.id }
+        } ?? false
+
+        // Only restore if we don't have a valid session for this project
+        if !currentSessionBelongsToProject && !sessions.isEmpty {
+            // Restore from UserDefaults (more reliable than project.lastActiveSessionId for non-persisted projects)
+            let lastId = UserDefaults.standard.string(forKey: "lastSession:\(project.path)")
+                .flatMap { UUID(uuidString: $0) }
+
+            if let lastId = lastId,
+               let lastSession = sessions.first(where: { $0.id == lastId }) {
+                windowState.activeSession = lastSession
+            } else {
+                // Fall back to most recent session
+                windowState.activeSession = sessions.first
             }
         }
     }
@@ -1575,9 +1593,26 @@ struct TerminalHeader: View {
     @EnvironmentObject var appState: AppState
     let session: Session
     let project: Project
+    @Binding var isSidebarCollapsed: Bool
 
     var body: some View {
         HStack(spacing: 14) {
+            // Sidebar toggle button
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isSidebarCollapsed.toggle()
+                }
+            } label: {
+                Image(systemName: isSidebarCollapsed ? "sidebar.leading" : "sidebar.left")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .help(isSidebarCollapsed ? "Show Sidebar" : "Hide Sidebar")
+
             // Status indicator
             ZStack {
                 Circle()
@@ -1639,6 +1674,7 @@ struct TerminalArea: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var windowState: WindowState
     let project: Project
+    @Binding var isSidebarCollapsed: Bool
     @State private var launchedExternalSessions: Set<UUID> = []
 
     var body: some View {
@@ -1653,7 +1689,7 @@ struct TerminalArea: View {
                     )
                 } else {
                     VStack(spacing: 0) {
-                        TerminalHeader(session: session, project: project)
+                        TerminalHeader(session: session, project: project, isSidebarCollapsed: $isSidebarCollapsed)
 
                         // Subtle separator line with gradient
                         Rectangle()
