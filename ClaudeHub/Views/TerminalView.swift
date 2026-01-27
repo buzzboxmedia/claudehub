@@ -853,19 +853,28 @@ class TerminalContainerView: NSView {
     }
 
     private func setupDragDrop() {
-        // Register for file drag and drop
-        registerForDraggedTypes([.fileURL, .png, .tiff, .pdf])
+        // Register for file drag and drop, including file promises (used by Mail, etc.)
+        registerForDraggedTypes([.fileURL, .png, .tiff, .pdf] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        // Accept file drops
-        if sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
+        // Accept file drops or file promises (from Mail, etc.)
+        let dominated = sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        let hasPromises = sender.draggingPasteboard.canReadObject(forClasses: [NSFilePromiseReceiver.self], options: nil)
+        if dominated || hasPromises {
             return .copy
         }
         return []
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        // Try file promises first (Mail, etc.)
+        if let promises = sender.draggingPasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil) as? [NSFilePromiseReceiver], !promises.isEmpty {
+            handleFilePromises(promises)
+            return true
+        }
+
+        // Fall back to regular file URLs
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else {
             return false
         }
@@ -879,6 +888,35 @@ class TerminalContainerView: NSView {
 
         focusTerminal()
         return true
+    }
+
+    private func handleFilePromises(_ promises: [NSFilePromiseReceiver]) {
+        // Save promised files to a temp directory, then insert paths
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("ClaudeHub-drops-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        let group = DispatchGroup()
+        var receivedURLs: [URL] = []
+
+        for promise in promises {
+            group.enter()
+            promise.receivePromisedFiles(atDestination: tempDir, options: [:], operationQueue: .main) { [weak self] url, error in
+                if let error = error {
+                    self?.logger.error("Failed to receive promised file: \(error.localizedDescription)")
+                } else {
+                    receivedURLs.append(url)
+                    self?.logger.info("Received promised file: \(url.path)")
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            for url in receivedURLs {
+                self?.terminalView?.send(txt: url.path + " ")
+            }
+            self?.focusTerminal()
+        }
     }
 
     deinit {
