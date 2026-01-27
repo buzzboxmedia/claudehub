@@ -417,15 +417,17 @@ class TaskImportService {
             }
 
             let taskFile = item.appendingPathComponent("TASK.md")
-            if fileManager.fileExists(atPath: taskFile.path) {
-                // This is a task folder
+            let hasTaskMd = fileManager.fileExists(atPath: taskFile.path)
+
+            if hasTaskMd {
+                // This folder has a TASK.md - add it as a task
                 taskFolders.append(item)
-            } else {
-                // Check if it's a sub-project folder (no number prefix)
-                if !(name.first?.isNumber ?? false) {
-                    // Recurse into sub-project folders
-                    taskFolders.append(contentsOf: findTaskFolders(in: item))
-                }
+            }
+
+            // Always recurse into non-numbered folders to find nested tasks
+            // (sub-project folders can have both their own TASK.md AND contain tasks)
+            if !(name.first?.isNumber ?? false) {
+                taskFolders.append(contentsOf: findTaskFolders(in: item))
             }
         }
 
