@@ -95,10 +95,16 @@ struct WorkspaceView: View {
                 print("Auto-imported \(imported) tasks")
             }
 
-            if windowState.activeSession == nil && !sessions.isEmpty {
-                // Restore last active session - check both Project property and UserDefaults
-                let lastId = project.lastActiveSessionId ??
-                    (UserDefaults.standard.string(forKey: "lastSession:\(project.path)").flatMap { UUID(uuidString: $0) })
+            // Restore last active session for this project
+            // Check if current activeSession belongs to this project, if not, restore from saved
+            let currentSessionBelongsToProject = windowState.activeSession.map { session in
+                sessions.contains { $0.id == session.id }
+            } ?? false
+
+            if !currentSessionBelongsToProject && !sessions.isEmpty {
+                // Restore from UserDefaults (more reliable than project.lastActiveSessionId for non-persisted projects)
+                let lastId = UserDefaults.standard.string(forKey: "lastSession:\(project.path)")
+                    .flatMap { UUID(uuidString: $0) }
 
                 if let lastId = lastId,
                    let lastSession = sessions.first(where: { $0.id == lastId }) {
