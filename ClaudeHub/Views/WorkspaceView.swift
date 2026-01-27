@@ -241,6 +241,14 @@ struct SessionSidebar: View {
             return
         }
 
+        // Create task folder path
+        let subProjectName = selectedGroupForNewTask?.name
+        let expectedPath = TaskFolderService.shared.taskFolderPath(
+            projectPath: project.path,
+            subProjectName: subProjectName,
+            taskName: name
+        )
+
         let session = Session(
             name: name,
             projectPath: project.path,
@@ -248,23 +256,14 @@ struct SessionSidebar: View {
         )
         session.project = project
         session.taskGroup = selectedGroupForNewTask
+        session.taskFolderPath = expectedPath.path  // Set BEFORE insert to prevent duplicate imports
         modelContext.insert(session)
+        try? modelContext.save()  // Ensure it's persisted before file watcher can trigger
 
         // Export to Dropbox (if sync enabled)
         SessionSyncService.shared.exportSession(session)
 
-        // Create task folder with TASK.md
-        let subProjectName = selectedGroupForNewTask?.name
         selectedGroupForNewTask = nil
-
-        // Set expected task folder path BEFORE creating it (prevents duplicate import)
-        let expectedPath = TaskFolderService.shared.taskFolderPath(
-            projectPath: project.path,
-            subProjectName: subProjectName,
-            taskName: name
-        )
-        session.taskFolderPath = expectedPath.path
-
         windowState.activeSession = session
         isCreatingTask = false
         newTaskName = ""
@@ -1023,6 +1022,7 @@ struct ProjectGroupSection: View {
         session.taskFolderPath = expectedPath.path
 
         modelContext.insert(session)
+        try? modelContext.save()  // Ensure it's persisted before file watcher can trigger
 
         // Export to Dropbox (if sync enabled)
         SessionSyncService.shared.exportSession(session)
