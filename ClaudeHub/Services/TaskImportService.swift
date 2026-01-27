@@ -325,9 +325,9 @@ class TaskImportService {
             return 0
         }
 
-        // Get existing sessions linked to task folders
+        // Get existing sessions linked to task folders (lowercased for case-insensitive comparison)
         let existingTaskPaths = Set(
-            (project.sessions ?? []).compactMap { $0.taskFolderPath }
+            (project.sessions ?? []).compactMap { $0.taskFolderPath?.lowercased() }
         )
 
         var importedCount = 0
@@ -336,8 +336,8 @@ class TaskImportService {
         let taskFolders = findTaskFolders(in: tasksDir)
 
         for taskFolder in taskFolders {
-            // Skip if session already exists for this task folder
-            guard !existingTaskPaths.contains(taskFolder.path) else {
+            // Skip if session already exists for this task folder (case-insensitive)
+            guard !existingTaskPaths.contains(taskFolder.path.lowercased()) else {
                 continue
             }
 
