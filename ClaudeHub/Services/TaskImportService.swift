@@ -172,6 +172,61 @@ class TaskImportService {
         }
     }
 
+    /// Remove duplicate sessions with the same taskFolderPath
+    /// Keeps the session with hasBeenLaunched=true, or the first one if neither has it
+    @MainActor
+    func cleanupDuplicateSessions(for project: Project, modelContext: ModelContext) {
+        let projectPath = project.path
+        let descriptor = FetchDescriptor<Session>(
+            predicate: #Predicate<Session> { session in
+                session.projectPath == projectPath && session.taskFolderPath != nil
+            }
+        )
+        guard let sessions = try? modelContext.fetch(descriptor) else { return }
+
+        // Group sessions by taskFolderPath (lowercased for case-insensitive)
+        var sessionsByPath: [String: [Session]] = [:]
+        for session in sessions {
+            guard let path = session.taskFolderPath?.lowercased() else { continue }
+            sessionsByPath[path, default: []].append(session)
+        }
+
+        // Find and remove duplicates
+        var duplicatesToDelete: [Session] = []
+        for (_, sessionsWithPath) in sessionsByPath {
+            guard sessionsWithPath.count > 1 else { continue }
+
+            // Keep the one with hasBeenLaunched=true, or the first one
+            let sorted = sessionsWithPath.sorted { s1, s2 in
+                // Prefer hasBeenLaunched=true
+                if s1.hasBeenLaunched != s2.hasBeenLaunched {
+                    return s1.hasBeenLaunched
+                }
+                // Then prefer older (first created)
+                return s1.createdAt < s2.createdAt
+            }
+
+            // Keep first, delete rest
+            let toDelete = sorted.dropFirst()
+            duplicatesToDelete.append(contentsOf: toDelete)
+            logger.info("Found \(toDelete.count) duplicate(s) for: \(sorted.first?.name ?? "unknown")")
+        }
+
+        // Delete duplicates
+        for session in duplicatesToDelete {
+            modelContext.delete(session)
+        }
+
+        if !duplicatesToDelete.isEmpty {
+            do {
+                try modelContext.save()
+                logger.info("Removed \(duplicatesToDelete.count) duplicate sessions")
+            } catch {
+                logger.error("Failed to remove duplicates: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Discover and create ProjectGroups from folder structure
     /// This allows projects created on one machine to appear on another via Dropbox sync
     @MainActor
@@ -312,6 +367,9 @@ class TaskImportService {
         // First validate existing records against filesystem
         validateFilesystem(for: project, modelContext: modelContext)
 
+        // Clean up any duplicate sessions (same taskFolderPath)
+        cleanupDuplicateSessions(for: project, modelContext: modelContext)
+
         // Auto-discover project groups from folder structure
         discoverProjectGroups(for: project, modelContext: modelContext)
 
@@ -347,6 +405,19 @@ class TaskImportService {
         for taskFolder in taskFolders {
             // Skip if session already exists for this task folder (case-insensitive)
             guard !existingTaskPaths.contains(taskFolder.path.lowercased()) else {
+                continue
+            }
+
+            // Double-check by querying database directly for this specific path
+            // This catches race conditions where multiple imports run simultaneously
+            let folderPath = taskFolder.path
+            let pathCheckDescriptor = FetchDescriptor<Session>(
+                predicate: #Predicate<Session> { session in
+                    session.taskFolderPath == folderPath
+                }
+            )
+            if let existingCount = try? modelContext.fetchCount(pathCheckDescriptor), existingCount > 0 {
+                logger.info("Skipping duplicate import for: \(taskFolder.lastPathComponent)")
                 continue
             }
 

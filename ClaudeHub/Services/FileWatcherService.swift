@@ -12,6 +12,7 @@ class FileWatcherService {
     private var streamRef: FSEventStreamRef?
     private var watchedPath: String?
     private var debounceWorkItem: DispatchWorkItem?
+    private var isImporting = false
 
     /// Callback when changes are detected
     var onChangesDetected: (() -> Void)?
@@ -94,23 +95,35 @@ class FileWatcherService {
         debounceWorkItem = nil
     }
 
-    /// Handle FSEvents - debounced to avoid rapid-fire updates
+    /// Handle FSEvents - debounced to avoid rapid-fire updates during Dropbox sync
     private func handleFSEvents() {
+        // Skip if already importing
+        guard !isImporting else {
+            logger.info("Skipping filesystem event - import already in progress")
+            return
+        }
+
         // Cancel any pending work
         debounceWorkItem?.cancel()
 
         // Create new debounced work item
         let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.isImporting else { return }
+            self.isImporting = true
             logger.info("Filesystem changes detected, triggering validation")
             DispatchQueue.main.async {
-                self?.onChangesDetected?()
+                self.onChangesDetected?()
+                // Reset flag after a delay to allow for save to complete
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.isImporting = false
+                }
             }
         }
 
         debounceWorkItem = workItem
 
-        // Execute after 0.5 second debounce
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+        // Execute after 2 second debounce (longer for Dropbox sync)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
     }
 
     deinit {
