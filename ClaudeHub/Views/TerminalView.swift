@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftTerm
 import AppKit
-import QuartzCore
 import os.log
 
 private let viewLogger = Logger(subsystem: "com.buzzbox.claudehub", category: "TerminalView")
@@ -819,9 +818,6 @@ class ClaudeHubTerminalView: LocalProcessTerminalView {
         setupMouseMoveMonitor()
     }
 
-    // Mouse selection monitor stored here, managed by SwiftTermView
-    var mouseSelectionMonitor: Any?
-
     private func setupDragDrop() {
         registerForDraggedTypes([.fileURL, .png, .tiff, .pdf] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
     }
@@ -1154,9 +1150,6 @@ class ClaudeHubTerminalView: LocalProcessTerminalView {
         if let monitor = mouseMoveMonitor {
             NSEvent.removeMonitor(monitor)
         }
-        if let monitor = mouseSelectionMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
     }
 }
 
@@ -1181,45 +1174,6 @@ struct SwiftTermView: NSViewRepresentable {
 
         // Configure ClaudeHub features (drag-drop, key monitor)
         terminalView.configureClaudeHub()
-
-        // Install mouse selection monitor: intercepts mouseDown in the terminal
-        // and runs a tracking loop to manually pump mouseDragged events that
-        // SwiftUI's NSViewRepresentable hosting view would otherwise swallow.
-        if terminalView.mouseSelectionMonitor == nil {
-            let tv = terminalView  // strong capture
-            terminalView.mouseSelectionMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { event in
-                guard let w = tv.window else { return event }
-                let loc = tv.convert(event.locationInWindow, from: nil)
-                guard tv.bounds.contains(loc) else { return event }
-
-                // Forward mouseDown to SwiftTerm
-                tv.mouseDown(with: event)
-
-                // Manual tracking loop for drag/up
-                var tracking = true
-                while tracking {
-                    guard let next = w.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
-                    switch next.type {
-                    case .leftMouseDragged:
-                        tv.mouseDragged(with: next)
-                        // Force immediate redraw — layer must
-                        // be explicitly told to redisplay
-                        tv.layer?.setNeedsDisplay()
-                        tv.layer?.displayIfNeeded()
-                        CATransaction.flush()
-                    case .leftMouseUp:
-                        tv.mouseUp(with: next)
-                        tv.layer?.setNeedsDisplay()
-                        tv.layer?.displayIfNeeded()
-                        CATransaction.flush()
-                        tracking = false
-                    default:
-                        tracking = false
-                    }
-                }
-                return nil  // consume the event
-            }
-        }
 
         // Auto-focus after a delay (but don't steal from text fields)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

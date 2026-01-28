@@ -799,11 +799,11 @@ struct ProjectGroupSection: View {
 
                 // Actions - always in layout, opacity controlled by hover
                 HStack(spacing: 4) {
-                    // Open most recent task in Terminal.app
-                    if let recentTask = tasks.sorted(by: { $0.lastAccessedAt > $1.lastAccessedAt }).first {
+                    // Open project session in Terminal.app
+                    if let projSession = projectSession {
                         Button {
-                            let controller = appState.getOrCreateController(for: recentTask)
-                            let workingDir = recentTask.taskFolderPath ?? recentTask.projectPath
+                            let controller = appState.getOrCreateController(for: projSession)
+                            let workingDir = projSession.taskFolderPath ?? projSession.projectPath
                             controller.popOutToTerminal(workingDir: workingDir)
                         } label: {
                             Image(systemName: "arrow.up.forward")
