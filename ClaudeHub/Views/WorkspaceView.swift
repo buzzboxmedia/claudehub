@@ -799,6 +799,23 @@ struct ProjectGroupSection: View {
 
                 // Actions - always in layout, opacity controlled by hover
                 HStack(spacing: 4) {
+                    // Open most recent task in Terminal.app
+                    if let recentTask = tasks.sorted(by: { $0.lastAccessedAt > $1.lastAccessedAt }).first {
+                        Button {
+                            let controller = appState.getOrCreateController(for: recentTask)
+                            let workingDir = recentTask.taskFolderPath ?? recentTask.projectPath
+                            controller.popOutToTerminal(workingDir: workingDir)
+                        } label: {
+                            Image(systemName: "arrow.up.forward")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open in Terminal.app")
+                    }
+
                     // Add task to group
                     Button {
                         isCreatingTask = true
