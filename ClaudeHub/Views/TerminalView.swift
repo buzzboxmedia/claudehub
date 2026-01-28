@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftTerm
 import AppKit
+import QuartzCore
 import os.log
 
 private let viewLogger = Logger(subsystem: "com.buzzbox.claudehub", category: "TerminalView")
@@ -1140,24 +1141,10 @@ class ClaudeHubTerminalView: LocalProcessTerminalView {
 
 // MARK: - SwiftUI Wrapper
 
-/// Thin wrapper that prevents SwiftUI's layer compositing from swallowing
-/// SwiftTerm's setNeedsDisplay calls (which are needed for selection rendering).
-class TerminalHostView: NSView {
-    override var acceptsFirstResponder: Bool { false }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        // Route all hits to the terminal subview
-        if let terminal = subviews.first, bounds.contains(point) {
-            return terminal
-        }
-        return super.hitTest(point)
-    }
-}
-
 struct SwiftTermView: NSViewRepresentable {
     @ObservedObject var controller: TerminalController
 
-    func makeNSView(context: Context) -> TerminalHostView {
+    func makeNSView(context: Context) -> NSView {
         if controller.terminalView == nil {
             let terminal = ClaudeHubTerminalView(frame: .zero)
             controller.terminalView = terminal
@@ -1174,65 +1161,36 @@ struct SwiftTermView: NSViewRepresentable {
         // Configure ClaudeHub features (drag-drop, key monitor)
         terminalView.configureClaudeHub()
 
-        // Wrap in host view that preserves terminal's own drawing layer
-        let hostView = TerminalHostView()
-        hostView.wantsLayer = true
-        // Prevent SwiftUI from compositing terminal's drawing into the host layer
-        // This ensures setNeedsDisplay on the terminal triggers its own draw cycle
-        hostView.canDrawSubviewsIntoLayer = false
-
-        terminalView.translatesAutoresizingMaskIntoConstraints = false
-        hostView.addSubview(terminalView)
-        NSLayoutConstraint.activate([
-            terminalView.leadingAnchor.constraint(equalTo: hostView.leadingAnchor),
-            terminalView.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
-            terminalView.topAnchor.constraint(equalTo: hostView.topAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
-        ])
-
         // Install mouse selection monitor: intercepts mouseDown in the terminal
         // and runs a tracking loop to manually pump mouseDragged events that
-        // SwiftUI's hosting view would otherwise swallow.
+        // SwiftUI's NSViewRepresentable hosting view would otherwise swallow.
         if terminalView.mouseSelectionMonitor == nil {
             let tv = terminalView  // strong capture
-            let logger = Logger(subsystem: "com.buzzbox.claudehub", category: "MouseMonitor")
-            logger.warning("Installing mouse selection monitor for terminal")
             terminalView.mouseSelectionMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { event in
-                let hasWindow = tv.window != nil
-                let bw = tv.bounds.width
-                let bh = tv.bounds.height
-                logger.warning("MONITOR: mouseDown detected. hasWindow=\(hasWindow) bounds=\(bw)x\(bh)")
-                guard let w = tv.window else {
-                    logger.warning("MONITOR: no window, passing through")
-                    return event
-                }
+                guard let w = tv.window else { return event }
                 let loc = tv.convert(event.locationInWindow, from: nil)
-                guard tv.bounds.contains(loc) else {
-                    logger.warning("MONITOR: click outside terminal bounds at \(loc.x),\(loc.y)")
-                    return event
-                }
-                logger.warning("MONITOR: click INSIDE terminal at \(loc.x),\(loc.y) — starting tracking loop")
+                guard tv.bounds.contains(loc) else { return event }
 
                 // Forward mouseDown to SwiftTerm
                 tv.mouseDown(with: event)
 
                 // Manual tracking loop for drag/up
-                var dragCount = 0
                 var tracking = true
                 while tracking {
-                    guard let next = w.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else {
-                        logger.warning("MONITOR: nextEvent returned nil")
-                        break
-                    }
+                    guard let next = w.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
                     switch next.type {
                     case .leftMouseDragged:
-                        dragCount += 1
                         tv.mouseDragged(with: next)
-                        tv.setNeedsDisplay(tv.bounds)
+                        // Force immediate redraw — layer must
+                        // be explicitly told to redisplay
+                        tv.layer?.setNeedsDisplay()
+                        tv.layer?.displayIfNeeded()
+                        CATransaction.flush()
                     case .leftMouseUp:
-                        logger.warning("MONITOR: mouseUp after \(dragCount) drags. selectionActive=\(tv.selectionActive)")
                         tv.mouseUp(with: next)
-                        tv.setNeedsDisplay(tv.bounds)
+                        tv.layer?.setNeedsDisplay()
+                        tv.layer?.displayIfNeeded()
+                        CATransaction.flush()
                         tracking = false
                     default:
                         tracking = false
@@ -1247,10 +1205,10 @@ struct SwiftTermView: NSViewRepresentable {
             terminalView.focusTerminal()
         }
 
-        return hostView
+        return terminalView
     }
 
-    func updateNSView(_ nsView: TerminalHostView, context: Context) {
+    func updateNSView(_ nsView: NSView, context: Context) {
         // Don't steal focus on every update
     }
 }
