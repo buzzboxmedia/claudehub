@@ -620,8 +620,10 @@ class TerminalController: ObservableObject {
 
     /// Check if there's an existing Claude session for the given directory
     private func checkForExistingSession(in directory: String) -> Bool {
+        // Resolve symlinks to get the real path (Claude does this internally)
+        let resolvedPath = URL(fileURLWithPath: directory).resolvingSymlinksInPath().path
         // Convert path to Claude's folder format (slashes become hyphens)
-        let claudeProjectPath = directory.replacingOccurrences(of: "/", with: "-")
+        let claudeProjectPath = resolvedPath.replacingOccurrences(of: "/", with: "-")
         let claudeProjectsDir = "\(NSHomeDirectory())/.claude/projects/\(claudeProjectPath)"
 
         // Check if the directory exists and has any .jsonl files
